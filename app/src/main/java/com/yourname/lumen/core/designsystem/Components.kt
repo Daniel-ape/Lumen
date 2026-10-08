@@ -45,12 +45,12 @@ fun LumenButton(
     onFocusChange: (Boolean) -> Unit = {},
 ) {
     val colors = LumenTheme.colors
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(8.dp)
     Box(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = shape, onFocusChange = onFocusChange)
             .background(if (primary) Color.White else colors.surfaceHigh)
-            .padding(horizontal = 30.dp, vertical = 13.dp),
+            .padding(horizontal = 22.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         LumenText(
@@ -83,8 +83,8 @@ fun LumenProgressBar(progress: Float, modifier: Modifier = Modifier) {
 fun LogoTile(initial: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(44.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF1B1B21)),
         contentAlignment = Alignment.Center,
     ) {

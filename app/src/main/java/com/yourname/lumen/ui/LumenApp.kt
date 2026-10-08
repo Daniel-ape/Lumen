@@ -27,6 +27,7 @@ fun LumenApp() {
     var section by remember { mutableStateOf(Section.Home) }
     var dockHasFocus by remember { mutableStateOf(false) }
     val dockFocus = remember { FocusRequester() }
+    val heroFocus = remember { FocusRequester() }
 
     // Back from content returns to the dock; Back on the dock leaves the app.
     BackHandler(enabled = !dockHasFocus) {
@@ -45,7 +46,7 @@ fun LumenApp() {
             label = "section",
         ) { current ->
             when (current) {
-                Section.Home -> HomeScreen()
+                Section.Home -> HomeScreen(dockFocus = dockFocus, heroFocus = heroFocus)
                 else -> PlaceholderScreen(current)
             }
         }
@@ -54,10 +55,11 @@ fun LumenApp() {
             selected = section,
             onSelect = { section = it },
             selectedFocusRequester = dockFocus,
+            downTarget = heroFocus,
             onDockFocusChange = { dockHasFocus = it },
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 24.dp),
+                .padding(top = 18.dp),
         )
     }
 }

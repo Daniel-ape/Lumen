@@ -24,6 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -35,7 +38,13 @@ import com.yourname.lumen.core.designsystem.hueColor
 import kotlinx.coroutines.delay
 
 @Composable
-fun HeroSection(items: List<HeroItem>, modifier: Modifier = Modifier) {
+fun HeroSection(
+    items: List<HeroItem>,
+    heroFocus: FocusRequester,
+    upTarget: FocusRequester,
+    downTarget: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
     var index by remember { mutableIntStateOf(0) }
@@ -49,7 +58,7 @@ fun HeroSection(items: List<HeroItem>, modifier: Modifier = Modifier) {
         }
     }
 
-    Box(modifier = modifier.fillMaxWidth().height(440.dp)) {
+    Box(modifier = modifier.fillMaxWidth().height(360.dp)) {
         // Backdrop and text crossfade. Buttons live outside so focus is never lost mid-fade.
         Crossfade(targetState = index, animationSpec = tween(600), label = "hero") { i ->
             val item = items[i]
@@ -82,7 +91,7 @@ fun HeroSection(items: List<HeroItem>, modifier: Modifier = Modifier) {
                     LumenText(item.label, type.body, color = colors.textSecondary)
                     LumenText(item.title, type.display)
                     LumenText(item.meta, type.body, color = colors.textSecondary)
-                    LumenText(item.overview, type.body, maxLines = 3)
+                    LumenText(item.overview, type.body, maxLines = 2)
                 }
             }
         }
@@ -90,10 +99,19 @@ fun HeroSection(items: List<HeroItem>, modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = Dimens.ScreenPadding, bottom = 44.dp),
+                .padding(start = Dimens.ScreenPadding, bottom = 36.dp)
+                .focusProperties {
+                    up = upTarget
+                    down = downTarget
+                },
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            LumenButton("Watch", primary = true, onFocusChange = { paused = it })
+            LumenButton(
+                text = "Watch",
+                modifier = Modifier.focusRequester(heroFocus),
+                primary = true,
+                onFocusChange = { paused = it },
+            )
             LumenButton("More info", onFocusChange = { paused = it })
             LumenButton(
                 text = "Next",
@@ -105,7 +123,7 @@ fun HeroSection(items: List<HeroItem>, modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = Dimens.ScreenPadding, bottom = 56.dp),
+                .padding(end = Dimens.ScreenPadding, bottom = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items.indices.forEach { dot ->

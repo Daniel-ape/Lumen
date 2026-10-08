@@ -7,7 +7,9 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -32,6 +34,12 @@ data class LumenTypography(
     val label: TextStyle,
 )
 
+/**
+ * Global size of the whole interface. 1.0 = Android default, lower = smaller and more compact.
+ * Scales every dp and sp in the app at once.
+ */
+const val UiScale = 0.8f
+
 object Dimens {
     val ScreenPadding = 48.dp
     val CardRadius = 12.dp
@@ -51,11 +59,11 @@ private val DarkColors = LumenColors(
 )
 
 private val DefaultTypography = LumenTypography(
-    display = TextStyle(fontSize = 54.sp, lineHeight = 58.sp, fontWeight = FontWeight.Bold),
-    title = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.SemiBold),
-    heading = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.SemiBold),
-    body = TextStyle(fontSize = 20.sp, lineHeight = 28.sp),
-    label = TextStyle(fontSize = 16.sp),
+    display = TextStyle(fontSize = 46.sp, lineHeight = 50.sp, fontWeight = FontWeight.Bold),
+    title = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.SemiBold),
+    heading = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+    body = TextStyle(fontSize = 17.sp, lineHeight = 24.sp),
+    label = TextStyle(fontSize = 14.sp),
 )
 
 private val LocalLumenColors = staticCompositionLocalOf { DarkColors }
@@ -75,7 +83,9 @@ object LumenTheme {
 
 @Composable
 fun LumenTheme(content: @Composable () -> Unit) {
+    val base = LocalDensity.current
     CompositionLocalProvider(
+        LocalDensity provides Density(density = base.density * UiScale, fontScale = base.fontScale),
         LocalLumenColors provides DarkColors,
         LocalLumenTypography provides DefaultTypography,
         content = content,

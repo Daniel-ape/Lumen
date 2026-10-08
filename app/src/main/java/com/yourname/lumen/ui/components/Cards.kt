@@ -37,7 +37,7 @@ fun ChannelCard(
     val colors = LumenTheme.colors
     Column(
         modifier = modifier
-            .width(300.dp)
+            .width(260.dp)
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(Dimens.CardRadius))
             .background(colors.surface)
             .padding(16.dp),
@@ -76,7 +76,7 @@ fun PosterCard(
 ) {
     Column(
         modifier = modifier
-            .width(170.dp)
+            .width(150.dp)
             .aspectRatio(2f / 3f)
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(Dimens.CardRadius))
             .background(

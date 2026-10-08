@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -25,17 +26,19 @@ fun LumenDock(
     selected: Section,
     onSelect: (Section) -> Unit,
     selectedFocusRequester: FocusRequester,
+    downTarget: FocusRequester,
     onDockFocusChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
+            .focusProperties { down = downTarget }
             .onFocusChanged { onDockFocusChange(it.hasFocus) }
             .focusGroup()
             .clip(RoundedCornerShape(50))
             .background(LumenTheme.colors.dock)
-            .padding(6.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Section.entries.forEach { section ->
             DockItem(
@@ -64,12 +67,12 @@ private fun DockItem(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(50), focusedScale = 1.04f)
             .background(if (selected) colors.surfaceHigh else Color.Transparent)
-            .padding(horizontal = 24.dp, vertical = 10.dp),
+            .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         LumenText(
             text = title,
-            style = LumenTheme.typography.body,
+            style = LumenTheme.typography.label,
             color = if (selected) colors.textPrimary else colors.textSecondary,
         )
     }
