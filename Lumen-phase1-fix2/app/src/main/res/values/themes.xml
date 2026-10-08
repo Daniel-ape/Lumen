@@ -1,7 +1,0 @@
-<resources>
-    <style name="Theme.Lumen" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/lumen_bg</item>
-        <item name="android:statusBarColor">@color/lumen_bg</item>
-        <item name="android:navigationBarColor">@color/lumen_bg</item>
-    </style>
-</resources>
