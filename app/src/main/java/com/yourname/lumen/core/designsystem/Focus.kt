@@ -74,3 +74,14 @@ fun Modifier.routeKey(direction: Key, target: FocusRequester): Modifier =
             false
         }
     }
+
+/** Runs [action] and consumes the key when [direction] is pressed. */
+fun Modifier.onDirection(direction: Key, action: () -> Unit): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.key == direction) {
+            action()
+            true
+        } else {
+            false
+        }
+    }

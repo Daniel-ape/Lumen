@@ -1,84 +1,201 @@
 package com.yourname.lumen.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.yourname.lumen.core.designsystem.Dimens
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
-import com.yourname.lumen.ui.components.ChannelCard
+import com.yourname.lumen.core.designsystem.hueOf
+import com.yourname.lumen.core.designsystem.onDirection
+import com.yourname.lumen.domain.model.HomeState
+import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.ui.components.PosterCard
+import kotlinx.coroutines.launch
 
+/**
+ * Home scrolls row by row instead of nudging a little on every focus change. That removes the
+ * shaking, and it always returns to the full-screen hero when you go back up.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
+    state: HomeState,
     dockFocus: FocusRequester,
-    heroFocus: FocusRequester,
-    onHeroHue: (Float) -> Unit,
+    contentFocus: FocusRequester,
+    dockHasFocus: Boolean,
+    onAmbient: (String?) -> Unit,
+    onAddSource: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val firstRowFocus = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val topInset = with(LocalDensity.current) { 72.dp.roundToPx() }
+    val rowFocus = remember { List(2) { FocusRequester() } }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 80.dp),
-    ) {
-        item {
-            HeroSection(
-                items = SampleData.hero,
-                heroFocus = heroFocus,
-                upTarget = dockFocus,
-                downTarget = firstRowFocus,
-                onHueChange = onHeroHue,
-                modifier = Modifier.fillParentMaxHeight(),
-            )
+    // Horizontal rows keep Android's normal scrolling; only the page itself is scrolled by us.
+    val defaultSpec = LocalBringIntoViewSpec.current
+    val pageSpec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
         }
+    }
 
-        item { SectionTitle("Recently watched channels") }
-        item {
-            // Vertical content padding leaves room for the focus scale-up so it never clips.
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.RowGap),
-            ) {
-                itemsIndexed(SampleData.channels) { i, c ->
-                    ChannelCard(
-                        name = c.name,
-                        program = c.program,
-                        progress = c.progress,
-                        modifier = if (i == 0) Modifier.focusRequester(firstRowFocus) else Modifier,
+    val rows: List<Pair<String, List<MediaItem>>> = (state as? HomeState.Ready)?.content?.let {
+        listOf("Recently added movies" to it.movies, "Recently added series" to it.series)
+            .filter { row -> row.second.isNotEmpty() }
+    } ?: emptyList()
+
+    // Whenever the dock has focus, show the full hero behind it.
+    LaunchedEffect(dockHasFocus) {
+        if (dockHasFocus) listState.animateScrollToItem(0)
+    }
+
+    val goToHero: () -> Unit = {
+        scope.launch {
+            listState.animateScrollToItem(0)
+            runCatching { contentFocus.requestFocus() }
+        }
+    }
+    val goToRow: (Int) -> Unit = { k ->
+        scope.launch {
+            listState.animateScrollToItem(1 + 2 * k, -topInset)
+            runCatching { rowFocus[k].requestFocus() }
+        }
+    }
+    val goToDock: () -> Unit = { runCatching { dockFocus.requestFocus() } }
+
+    CompositionLocalProvider(LocalBringIntoViewSpec provides pageSpec) {
+        LazyColumn(
+            modifier = modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(bottom = 80.dp),
+        ) {
+            when (state) {
+                HomeState.Loading -> item {
+                    HeroMessage(
+                        title = "Loading…",
+                        message = "Getting what's new from your source.",
+                        primaryLabel = null,
+                        onPrimary = {},
+                        contentFocus = contentFocus,
+                        onUp = goToDock,
+                        modifier = Modifier.fillParentMaxHeight(),
                     )
+                }
+
+                HomeState.NoSource -> item {
+                    HeroMessage(
+                        title = "Add your first source",
+                        message = "Connect your IPTV service to see what's new from your provider.",
+                        primaryLabel = "Add source",
+                        onPrimary = onAddSource,
+                        contentFocus = contentFocus,
+                        onUp = goToDock,
+                        modifier = Modifier.fillParentMaxHeight(),
+                    )
+                }
+
+                HomeState.Failed -> item {
+                    HeroMessage(
+                        title = "Unable to connect to this source.",
+                        message = "Check your connection and try again.",
+                        primaryLabel = "Retry",
+                        onPrimary = onRetry,
+                        contentFocus = contentFocus,
+                        onUp = goToDock,
+                        modifier = Modifier.fillParentMaxHeight(),
+                    )
+                }
+
+                is HomeState.Ready -> {
+                    if (state.content.hero.isEmpty()) {
+                        item {
+                            HeroMessage(
+                                title = "Nothing here yet",
+                                message = "No movies or series were found on this source.",
+                                primaryLabel = null,
+                                onPrimary = {},
+                                contentFocus = contentFocus,
+                                onUp = goToDock,
+                                modifier = Modifier.fillParentMaxHeight(),
+                            )
+                        }
+                    } else {
+                        item {
+                            HeroSection(
+                                items = state.content.hero,
+                                contentFocus = contentFocus,
+                                onUp = goToDock,
+                                onDown = { if (rows.isNotEmpty()) goToRow(0) },
+                                onFocused = { scope.launch { listState.animateScrollToItem(0) } },
+                                onAmbient = onAmbient,
+                                modifier = Modifier.fillParentMaxHeight(),
+                            )
+                        }
+                        rows.forEachIndexed { k, row ->
+                            item { SectionTitle(row.first) }
+                            item {
+                                CompositionLocalProvider(LocalBringIntoViewSpec provides defaultSpec) {
+                                    PosterRow(
+                                        items = row.second,
+                                        firstFocus = rowFocus[k],
+                                        onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
+                                        onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-
-        item { SectionTitle("Continue watching movies") }
-        item { PosterRow(SampleData.movies) }
-
-        item { SectionTitle("Recently watched series") }
-        item { PosterRow(SampleData.series) }
     }
 }
 
 @Composable
-private fun PosterRow(posters: List<PosterItem>) {
+private fun PosterRow(
+    items: List<MediaItem>,
+    firstFocus: FocusRequester,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+) {
     LazyRow(
+        modifier = Modifier
+            .onDirection(Key.DirectionUp, onUp)
+            .onDirection(Key.DirectionDown, onDown),
+        // Vertical padding leaves room for the focus scale-up so it never clips.
         contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(Dimens.RowGap),
     ) {
-        items(posters) { p ->
-            PosterCard(title = p.title, subtitle = p.subtitle, hue = p.hue)
+        itemsIndexed(items) { i, m ->
+            PosterCard(
+                title = m.title,
+                subtitle = listOfNotNull(m.year, m.rating?.let { "★ $it" }).joinToString(" · "),
+                hue = hueOf(m.title),
+                imageUrl = m.posterUrl,
+                modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
+            )
         }
     }
 }

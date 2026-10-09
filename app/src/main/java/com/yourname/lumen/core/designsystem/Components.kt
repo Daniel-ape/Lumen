@@ -98,3 +98,6 @@ fun LogoTile(initial: String, modifier: Modifier = Modifier) {
 
 fun hueColor(hue: Float, saturation: Float, value: Float): Color =
     Color(android.graphics.Color.HSVToColor(floatArrayOf(hue % 360f, saturation, value)))
+
+/** A stable color hue for a title, used for the soft glow behind the hero. */
+fun hueOf(text: String): Float = (kotlin.math.abs(text.hashCode()) % 360).toFloat()

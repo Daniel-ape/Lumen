@@ -1,6 +1,7 @@
 package com.yourname.lumen.ui.navigation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.dp
@@ -24,6 +26,8 @@ import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.SearchIcon
 import com.yourname.lumen.core.designsystem.routeKey
 import com.yourname.lumen.core.designsystem.tvFocusable
+
+private val GlassShape = RoundedCornerShape(50)
 
 @Composable
 fun LumenDock(
@@ -40,8 +44,13 @@ fun LumenDock(
             .routeKey(Key.DirectionDown, downTarget)
             .onFocusChanged { onDockFocusChange(it.hasFocus) }
             .focusGroup()
-            .clip(RoundedCornerShape(50))
-            .background(colors.dock)
+            .clip(GlassShape)
+            .background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x1AFFFFFF))))
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(listOf(Color(0x80FFFFFF), Color(0x1FFFFFFF))),
+                shape = GlassShape,
+            )
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -81,7 +90,7 @@ private fun DockItem(
     Box(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(50), focusedScale = 1.05f)
-            .background(if (selected) colors.surfaceHigh else Color.Transparent)
+            .background(if (selected) Color(0x38FFFFFF) else Color.Transparent)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
