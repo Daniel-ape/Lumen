@@ -12,16 +12,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourname.lumen.core.designsystem.GearIcon
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.SearchIcon
+import com.yourname.lumen.core.designsystem.routeKey
 import com.yourname.lumen.core.designsystem.tvFocusable
 
 @Composable
@@ -36,7 +37,7 @@ fun LumenDock(
     val colors = LumenTheme.colors
     Row(
         modifier = modifier
-            .focusProperties { down = downTarget }
+            .routeKey(Key.DirectionDown, downTarget)
             .onFocusChanged { onDockFocusChange(it.hasFocus) }
             .focusGroup()
             .clip(RoundedCornerShape(50))

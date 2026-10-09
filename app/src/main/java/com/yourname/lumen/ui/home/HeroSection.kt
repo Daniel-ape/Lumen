@@ -27,16 +27,18 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.yourname.lumen.core.designsystem.Dimens
 import com.yourname.lumen.core.designsystem.LumenButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.hueColor
+import com.yourname.lumen.core.designsystem.routeKey
 import kotlinx.coroutines.delay
 
 @Composable
@@ -64,7 +66,7 @@ fun HeroSection(
         }
     }
 
-    Box(modifier = modifier.fillMaxWidth().height(360.dp)) {
+    Box(modifier = modifier.fillMaxWidth()) {
         // Backdrop and text crossfade. Buttons live outside so focus is never lost mid-fade.
         Crossfade(targetState = index, animationSpec = tween(600), label = "hero") { i ->
             val item = items[i]
@@ -83,14 +85,14 @@ fun HeroSection(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = Dimens.ScreenPadding, bottom = 120.dp)
-                        .widthIn(max = 640.dp),
+                        .padding(start = Dimens.ScreenPadding, bottom = 108.dp)
+                        .widthIn(max = 560.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    LumenText(item.label, type.body, color = colors.textSecondary)
-                    LumenText(item.title, type.display)
-                    LumenText(item.meta, type.body, color = colors.textSecondary)
-                    LumenText(item.overview, type.body, maxLines = 2)
+                    LumenText(item.label, type.label, color = colors.textSecondary)
+                    LumenText(item.title, type.display.copy(fontSize = 36.sp, lineHeight = 40.sp))
+                    LumenText(item.meta, type.label, color = colors.textSecondary)
+                    LumenText(item.overview, type.body.copy(fontSize = 15.sp, lineHeight = 21.sp), maxLines = 2)
                 }
             }
         }
@@ -99,10 +101,8 @@ fun HeroSection(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = Dimens.ScreenPadding, bottom = 36.dp)
-                .focusProperties {
-                    up = upTarget
-                    down = downTarget
-                }
+                .routeKey(Key.DirectionUp, upTarget)
+                .routeKey(Key.DirectionDown, downTarget)
                 .onFocusChanged { paused = it.hasFocus }
                 .focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(14.dp),

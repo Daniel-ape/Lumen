@@ -41,6 +41,7 @@ fun HomeScreen(
                 upTarget = dockFocus,
                 downTarget = firstRowFocus,
                 onHueChange = onHeroHue,
+                modifier = Modifier.fillParentMaxHeight(),
             )
         }
 
