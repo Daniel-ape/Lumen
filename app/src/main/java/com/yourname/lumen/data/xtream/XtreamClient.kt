@@ -153,12 +153,12 @@ private fun JSONObject.firstOf(key: String): String? = when (val v = opt(key)) {
     else -> null
 }
 
-private val tagPrefix = Regex("""^\s*(\|[^|]{1,8}\||\[[^\]]{1,8}\])\s*""")
+private val tagPrefix = Regex("""^\s*(\|[^|]{1,8}\||\[[^\]]{1,8}\]|\([A-Z]{1,5}\)|[A-Z]{2,4}\s*[-:|]\s+)\s*""")
 private val yearSuffix = Regex("""\s*[(\[]((19|20)\d{2})[)\]]\s*$""")
 
 private fun cleanTitle(raw: String): String {
     var t = raw.trim()
-    repeat(2) { t = tagPrefix.replace(t, "") }
+    repeat(3) { t = tagPrefix.replace(t, "") }
     return yearSuffix.replace(t, "").trim().ifEmpty { raw.trim() }
 }
 

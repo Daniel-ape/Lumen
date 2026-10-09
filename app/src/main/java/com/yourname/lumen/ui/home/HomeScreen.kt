@@ -1,6 +1,7 @@
 package com.yourname.lumen.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -181,20 +182,22 @@ private fun PosterRow(
     onDown: () -> Unit,
 ) {
     LazyRow(
+        // The requester sits on the whole row, so it works even after the row was scrolled sideways.
         modifier = Modifier
+            .focusRequester(firstFocus)
+            .focusGroup()
             .onDirection(Key.DirectionUp, onUp)
             .onDirection(Key.DirectionDown, onDown),
         // Vertical padding leaves room for the focus scale-up so it never clips.
         contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(Dimens.RowGap),
     ) {
-        itemsIndexed(items) { i, m ->
+        items(items) { m ->
             PosterCard(
                 title = m.title,
                 subtitle = listOfNotNull(m.year, m.rating?.let { "★ $it" }).joinToString(" · "),
                 hue = hueOf(m.title),
                 imageUrl = m.posterUrl,
-                modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
             )
         }
     }

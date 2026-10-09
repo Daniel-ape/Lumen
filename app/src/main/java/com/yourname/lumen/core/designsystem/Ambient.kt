@@ -29,7 +29,7 @@ fun AmbientBackground(imageUrl: String?, modifier: Modifier = Modifier) {
         Crossfade(targetState = imageUrl, animationSpec = tween(900), label = "ambient") { url ->
             if (url != null) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context).data(url).size(96, 54).build(),
+                    model = ImageRequest.Builder(context).data(url).size(32, 18).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -40,7 +40,7 @@ fun AmbientBackground(imageUrl: String?, modifier: Modifier = Modifier) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0x990B0B0D)),
+                .background(Color(0x800B0B0D)),
         )
     }
 }

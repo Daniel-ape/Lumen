@@ -26,11 +26,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -46,6 +52,19 @@ import com.yourname.lumen.core.designsystem.onDirection
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import kotlinx.coroutines.delay
+
+/** Fades the bottom of whatever it is applied to into transparency, so it melts into the page. */
+private fun Modifier.fadeBottom(): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.verticalGradient(0.55f to Color.Black, 1f to Color.Transparent),
+            blendMode = BlendMode.DstIn,
+        )
+    }
+
+private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
 
 /** Full-screen hero. Artwork comes from the user's own source. */
 @Composable
@@ -77,46 +96,35 @@ fun HeroSection(
     }
 
     Box(modifier = modifier.fillMaxWidth()) {
-        // Backdrop and text crossfade. Buttons live outside so focus is never lost mid-fade.
+        // Artwork and text crossfade. Buttons live outside so focus is never lost mid-fade.
         Crossfade(targetState = index, animationSpec = tween(600), label = "hero") { i ->
             val item = items[i]
             val image = item.backdropUrl ?: item.posterUrl
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                hueColor(hueOf(item.title), 0.5f, 0.4f).copy(alpha = 0.45f),
-                                Color.Transparent,
-                            ),
-                        ),
-                    ),
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (image != null) {
                     AsyncImage(
                         model = image,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .fadeBottom(),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        hueColor(hueOf(item.title), 0.5f, 0.4f).copy(alpha = 0.45f),
+                                        Color.Transparent,
+                                    ),
+                                ),
+                            ),
                     )
                 }
-                // Dark fade on the left for the text, and at the bottom into the page.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.horizontalGradient(listOf(Color(0xE60B0B0D), Color.Transparent)),
-                        ),
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(listOf(Color.Transparent, Color(0xB30B0B0D))),
-                        ),
-                )
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -124,18 +132,30 @@ fun HeroSection(
                         .widthIn(max = 560.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    LumenText("Recently added", type.label, color = colors.textSecondary)
-                    LumenText(item.title, type.display.copy(fontSize = 36.sp, lineHeight = 40.sp), maxLines = 2)
+                    LumenText(
+                        "Recently added",
+                        type.label.copy(shadow = TextShadow),
+                        color = Color.White.copy(alpha = 0.8f),
+                    )
+                    LumenText(
+                        item.title,
+                        type.display.copy(fontSize = 36.sp, lineHeight = 40.sp, shadow = TextShadow),
+                        maxLines = 2,
+                    )
                     val meta = listOfNotNull(
                         if (item.type == MediaType.Series) "Series" else "Movie",
                         item.year,
                         item.rating?.let { "★ $it" },
                     ).joinToString(" · ")
-                    LumenText(meta, type.label, color = colors.textSecondary)
+                    LumenText(
+                        meta,
+                        type.label.copy(shadow = TextShadow),
+                        color = Color.White.copy(alpha = 0.8f),
+                    )
                     if (!item.plot.isNullOrBlank()) {
                         LumenText(
                             item.plot,
-                            type.body.copy(fontSize = 15.sp, lineHeight = 21.sp),
+                            type.body.copy(fontSize = 15.sp, lineHeight = 21.sp, shadow = TextShadow),
                             maxLines = 2,
                         )
                     }
@@ -162,10 +182,6 @@ fun HeroSection(
                 primary = true,
             )
             LumenButton("More info")
-            LumenButton(
-                text = "Next",
-                onClick = { index = (index + 1) % items.size },
-            )
         }
 
         Row(
