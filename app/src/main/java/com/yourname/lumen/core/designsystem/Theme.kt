@@ -38,7 +38,7 @@ data class LumenTypography(
  * Global size of the whole interface. 1.0 = Android default, lower = smaller and more compact.
  * Scales every dp and sp in the app at once.
  */
-const val UiScale = 0.8f
+const val UiScale = 1.0f
 
 object Dimens {
     val ScreenPadding = 48.dp

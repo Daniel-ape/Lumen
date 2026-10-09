@@ -25,14 +25,10 @@ import com.yourname.lumen.ui.components.PosterCard
 fun HomeScreen(
     dockFocus: FocusRequester,
     heroFocus: FocusRequester,
+    onHeroHue: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val firstRowFocus = remember { FocusRequester() }
-
-    // Start with focus on the hero so the remote works immediately.
-    LaunchedEffect(Unit) {
-        runCatching { heroFocus.requestFocus() }
-    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -44,6 +40,7 @@ fun HomeScreen(
                 heroFocus = heroFocus,
                 upTarget = dockFocus,
                 downTarget = firstRowFocus,
+                onHueChange = onHeroHue,
             )
         }
 

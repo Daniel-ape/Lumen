@@ -23,7 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -43,12 +45,16 @@ fun HeroSection(
     heroFocus: FocusRequester,
     upTarget: FocusRequester,
     downTarget: FocusRequester,
+    onHueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
     var index by remember { mutableIntStateOf(0) }
     var paused by remember { mutableStateOf(false) }
+
+    // Tell the app which color the page backdrop should glow.
+    LaunchedEffect(index) { onHueChange(items[index].hue) }
 
     // Auto-rotate every 8s, but never while a hero button has focus.
     LaunchedEffect(paused) {
@@ -66,21 +72,14 @@ fun HeroSection(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Brush.linearGradient(
+                        Brush.verticalGradient(
                             listOf(
-                                hueColor(item.hue, 0.5f, 0.34f),
-                                hueColor(item.hue + 50f, 0.45f, 0.09f),
+                                hueColor(item.hue, 0.5f, 0.4f).copy(alpha = 0.45f),
+                                Color.Transparent,
                             ),
                         ),
                     ),
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(listOf(Color.Transparent, colors.background)),
-                        ),
-                )
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -103,20 +102,20 @@ fun HeroSection(
                 .focusProperties {
                     up = upTarget
                     down = downTarget
-                },
+                }
+                .onFocusChanged { paused = it.hasFocus }
+                .focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             LumenButton(
                 text = "Watch",
                 modifier = Modifier.focusRequester(heroFocus),
                 primary = true,
-                onFocusChange = { paused = it },
             )
-            LumenButton("More info", onFocusChange = { paused = it })
+            LumenButton("More info")
             LumenButton(
                 text = "Next",
                 onClick = { index = (index + 1) % items.size },
-                onFocusChange = { paused = it },
             )
         }
 

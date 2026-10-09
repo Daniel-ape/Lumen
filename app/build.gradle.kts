@@ -20,7 +20,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Optimized build: much smoother than a debug build on a TV.
+            // Signed with the debug key so it installs without extra setup.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

@@ -1,6 +1,5 @@
 package com.yourname.lumen.core.designsystem
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
@@ -33,14 +32,11 @@ fun Modifier.tvFocusable(
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1f,
-        animationSpec = tween(durationMillis = 160),
+        animationSpec = tween(durationMillis = 120),
         label = "focusScale",
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (focused) Color.White.copy(alpha = 0.6f) else Color.Transparent,
-        animationSpec = tween(durationMillis = 160),
-        label = "focusBorder",
-    )
+    // Not animated on purpose: animating this in composition re-composed every card each frame.
+    val borderColor = if (focused) Color.White.copy(alpha = 0.6f) else Color.Transparent
     return this
         .onFocusChanged {
             focused = it.isFocused
