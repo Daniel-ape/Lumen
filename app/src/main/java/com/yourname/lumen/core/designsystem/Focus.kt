@@ -33,6 +33,7 @@ fun Modifier.tvFocusable(
     onClick: () -> Unit,
     shape: Shape,
     focusedScale: Float = 1.06f,
+    showOutline: Boolean = true,
     onFocusChange: (Boolean) -> Unit = {},
 ): Modifier {
     var focused by remember { mutableStateOf(false) }
@@ -52,7 +53,7 @@ fun Modifier.tvFocusable(
             scaleX = scale
             scaleY = scale
         }
-        .border(2.dp, borderColor, shape)
+        .then(if (focused && showOutline) Modifier.border(2.dp, borderColor, shape) else Modifier)
         .clip(shape)
         .clickable(
             interactionSource = remember { MutableInteractionSource() },

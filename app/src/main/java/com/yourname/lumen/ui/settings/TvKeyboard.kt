@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
+import com.yourname.lumen.core.designsystem.glass
 import com.yourname.lumen.core.designsystem.tvFocusable
 
 /**
@@ -56,7 +57,7 @@ fun TvKeyboard(
         Box(
             modifier = Modifier
                 .widthIn(min = 460.dp)
-                .background(colors.surface, RoundedCornerShape(10.dp))
+                .glass(RoundedCornerShape(10.dp))
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             LumenText(
@@ -99,7 +100,7 @@ private fun KeyButton(
     Box(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(8.dp), focusedScale = 1.08f)
-            .background(if (primary) Color.White else colors.surfaceHigh)
+            .glass(RoundedCornerShape(8.dp), strong = primary)
             .widthIn(min = if (wide) 84.dp else 38.dp)
             .padding(horizontal = 8.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
@@ -107,7 +108,7 @@ private fun KeyButton(
         LumenText(
             text = label,
             style = LumenTheme.typography.label,
-            color = if (primary) Color.Black else colors.textPrimary,
+            color = Color.White,
         )
     }
 }

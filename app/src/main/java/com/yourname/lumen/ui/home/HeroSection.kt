@@ -54,17 +54,6 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import kotlinx.coroutines.delay
 
-/** Fades the bottom of whatever it is applied to into transparency, so it melts into the page. */
-private fun Modifier.fadeBottom(): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        drawRect(
-            brush = Brush.verticalGradient(0.55f to Color.Black, 1f to Color.Transparent),
-            blendMode = BlendMode.DstIn,
-        )
-    }
-
 private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
 
 /** Full-screen hero with high-quality artwork that fades into the black page below. */
@@ -76,6 +65,8 @@ fun HeroSection(
     onUp: () -> Unit,
     onDown: () -> Unit,
     onFocused: () -> Unit,
+    autoRotate: Boolean,
+    onOpenDetails: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val type = LumenTheme.typography
@@ -83,8 +74,8 @@ fun HeroSection(
     var paused by remember { mutableStateOf(false) }
 
     // Auto-rotate every 8s, but never while a hero button has focus.
-    LaunchedEffect(paused) {
-        while (!paused) {
+    LaunchedEffect(paused, autoRotate) {
+        while (autoRotate && !paused) {
             delay(8_000)
             index = (index + 1) % items.size
         }
@@ -102,9 +93,19 @@ fun HeroSection(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // Melts the artwork into the black page. A plain gradient is far cheaper to draw
+                    // than masking the whole picture.
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .fadeBottom(),
+                            .background(
+                                Brush.verticalGradient(
+                                    0.5f to Color.Transparent,
+                                    1f to LumenTheme.colors.background,
+                                ),
+                            ),
                     )
                 }
                 Column(
@@ -164,8 +165,9 @@ fun HeroSection(
                 text = "Play",
                 modifier = Modifier.focusRequester(contentFocus),
                 primary = true,
+                onClick = { onOpenDetails(items[index]) },
             )
-            LumenCircleButton(text = "i")
+            LumenCircleButton(text = "i", onClick = { onOpenDetails(items[index]) })
         }
 
         // Small progress dots, centered along the bottom of the hero.

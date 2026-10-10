@@ -1,24 +1,33 @@
 package com.yourname.lumen.data.xtream
 
+import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.HomeContent
+import com.yourname.lumen.domain.model.MediaDetails
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.domain.model.Source
 import java.io.IOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.MalformedURLException
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
- * Talks to an Xtream Codes compatible server. Posters and backdrops come straight from
- * the provider, so what you see is what your own service offers.
+ * Talks to an Xtream Codes compatible server. Self-hosted panels that speak the same API work too.
+ * Posters and backdrops come straight from the provider.
  * Never log URLs from here: they contain the username and password.
  */
 class XtreamClient(private val source: Source) {
@@ -54,6 +63,19 @@ class XtreamClient(private val source: Source) {
         o.optJSONObject("user_info")?.optString("auth") == "1"
     }
 
+    /** Tests the connection and explains a failure in plain words. */
+    suspend fun checkConnection(): ConnectionResult = try {
+        if (authenticate()) {
+            ConnectionResult.Connected
+        } else {
+            ConnectionResult.Failed("The server rejected the username or password.")
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ConnectionResult.Failed(describeFailure(e))
+    }
+
     suspend fun loadHome(): HomeContent = coroutineScope {
         val moviesJob = async { runCatching { newestMovies() } }
         val seriesJob = async { runCatching { newestSeries() } }
@@ -78,6 +100,60 @@ class XtreamClient(private val source: Source) {
             }
         }
         HomeContent(hero = hero, movies = movies.take(20), series = series.take(20))
+    }
+
+    /** Full details for the details page. Falls back to what we already know if the server won't say more. */
+    suspend fun loadDetails(item: MediaItem): MediaDetails = withContext(Dispatchers.Default) {
+        val basic = MediaDetails(
+            title = item.title,
+            type = item.type,
+            year = item.year,
+            rating = item.rating,
+            plot = item.plot,
+            genres = null,
+            director = null,
+            cast = null,
+            duration = null,
+            seasons = null,
+            posterUrl = item.posterUrl,
+            backdropUrl = item.backdropUrl,
+        )
+        try {
+            if (item.type == MediaType.Movie) {
+                val info = JSONObject(fetch(url("get_vod_info", "vod_id" to item.id))).optJSONObject("info")
+                    ?: return@withContext basic
+                basic.copy(
+                    plot = info.str("plot") ?: info.str("description") ?: basic.plot,
+                    genres = info.str("genre"),
+                    director = info.str("director"),
+                    cast = info.str("cast") ?: info.str("actors"),
+                    duration = info.str("duration"),
+                    year = basic.year ?: info.str("releasedate")?.take(4),
+                    rating = basic.rating ?: ratingOf(info.optString("rating")),
+                    posterUrl = info.str("movie_image") ?: info.str("cover_big") ?: basic.posterUrl,
+                    backdropUrl = info.firstOf("backdrop_path")?.let { upgradeImage(it) } ?: basic.backdropUrl,
+                )
+            } else {
+                val root = JSONObject(fetch(url("get_series_info", "series_id" to item.id)))
+                val info = root.optJSONObject("info") ?: return@withContext basic
+                basic.copy(
+                    plot = info.str("plot") ?: basic.plot,
+                    genres = info.str("genre"),
+                    director = info.str("director"),
+                    cast = info.str("cast"),
+                    duration = info.str("episode_run_time")?.let { "$it min per episode" },
+                    seasons = root.optJSONObject("episodes")?.length(),
+                    year = basic.year ?: info.str("releaseDate")?.take(4) ?: info.str("releasedate")?.take(4),
+                    rating = basic.rating ?: ratingOf(info.optString("rating")),
+                    posterUrl = info.str("cover") ?: basic.posterUrl,
+                    backdropUrl = info.firstOf("backdrop_path")?.let { upgradeImage(it) } ?: basic.backdropUrl,
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            basic
+        }
     }
 
     private suspend fun newestMovies(): List<MediaItem> = withContext(Dispatchers.Default) {
@@ -141,9 +217,25 @@ class XtreamClient(private val source: Source) {
         }
     } catch (e: IOException) {
         item
-    } catch (e: org.json.JSONException) {
+    } catch (e: JSONException) {
         item
     }
+}
+
+/** Plain-language reason for a failed connection. Never includes the address or login. */
+fun describeFailure(e: Exception): String = when (e) {
+    is UnknownHostException -> "The server address could not be found."
+    is SocketTimeoutException -> "The server took too long to respond."
+    is ConnectException -> "Could not reach the server. Check the address and port."
+    is MalformedURLException -> "The server address isn't valid."
+    is SSLException -> "A secure connection could not be made. Try http:// instead of https://."
+    is JSONException -> "The server's reply wasn't what Lumen TV expects. Check that this is an Xtream Codes server."
+    is IOException -> when {
+        e.message?.startsWith("HTTP 401") == true || e.message?.startsWith("HTTP 403") == true ->
+            "The server rejected the login."
+        else -> "The server returned an error (${e.message ?: "unknown"})."
+    }
+    else -> "Could not connect to this source."
 }
 
 private fun JSONObject.str(key: String): String? =

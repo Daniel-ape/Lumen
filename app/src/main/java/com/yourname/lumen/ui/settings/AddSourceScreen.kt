@@ -1,7 +1,6 @@
 package com.yourname.lumen.ui.settings
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,22 +27,29 @@ import androidx.compose.ui.unit.dp
 import com.yourname.lumen.core.designsystem.LumenButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
+import com.yourname.lumen.core.designsystem.glass
 import com.yourname.lumen.core.designsystem.tvFocusable
+import com.yourname.lumen.domain.model.Source
 import kotlinx.coroutines.launch
 
+/**
+ * Add or edit an Xtream Codes connection. Pass [initial] to edit an existing one.
+ * [onSubmit] checks and saves it, and returns a message for the user, or null on success.
+ */
 @Composable
 fun AddSourceScreen(
     onClose: () -> Unit,
-    onSubmit: suspend (server: String, user: String, pass: String) -> Boolean,
+    onSubmit: suspend (server: String, user: String, pass: String) -> String?,
     modifier: Modifier = Modifier,
+    initial: Source? = null,
 ) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
     val scope = rememberCoroutineScope()
 
-    var server by remember { mutableStateOf("") }
-    var user by remember { mutableStateOf("") }
-    var pass by remember { mutableStateOf("") }
+    var server by remember { mutableStateOf(initial?.baseUrl ?: "") }
+    var user by remember { mutableStateOf(initial?.username ?: "") }
+    var pass by remember { mutableStateOf(initial?.password ?: "") }
     var editing by remember { mutableIntStateOf(-1) }
     var last by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
@@ -83,9 +89,12 @@ fun AddSourceScreen(
                 modifier = Modifier.width(480.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LumenText("Add Xtream source", type.title)
                 LumenText(
-                    "Enter the details from your provider.",
+                    if (initial == null) "Add Xtream source" else "Edit Xtream source",
+                    type.title,
+                )
+                LumenText(
+                    "Enter the details from your provider. Self-hosted servers that use the Xtream API work too.",
                     type.body,
                     color = colors.textSecondary,
                 )
@@ -106,23 +115,19 @@ fun AddSourceScreen(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     LumenButton(
-                        text = if (busy) "Connecting…" else "Connect",
+                        text = if (busy) "Connecting…" else if (initial == null) "Connect" else "Save",
                         primary = true,
                         onClick = {
                             if (!busy) {
                                 if (server.isBlank() || user.isBlank() || pass.isBlank()) {
-                                    error = "Fill in all three fields."
+                                    error = "Fill in the server address, username and password."
                                 } else {
                                     busy = true
                                     error = null
                                     scope.launch {
-                                        val ok = onSubmit(server, user, pass)
+                                        val problem = onSubmit(server, user, pass)
                                         busy = false
-                                        if (ok) {
-                                            onClose()
-                                        } else {
-                                            error = "Unable to connect to this source. Check the details and try again."
-                                        }
+                                        if (problem == null) onClose() else error = problem
                                     }
                                 }
                             }
@@ -145,11 +150,12 @@ private fun FieldRow(
 ) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
+    val shape = RoundedCornerShape(10.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .tvFocusable(onClick = onClick, shape = RoundedCornerShape(10.dp), focusedScale = 1.03f)
-            .background(colors.surface)
+            .tvFocusable(onClick = onClick, shape = shape, focusedScale = 1.03f)
+            .glass(shape)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {

@@ -17,6 +17,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -44,6 +45,10 @@ fun HomeScreen(
     dockFocus: FocusRequester,
     contentFocus: FocusRequester,
     dockHasFocus: Boolean,
+    showRatings: Boolean,
+    autoRotate: Boolean,
+    onOpenDetails: (MediaItem) -> Unit,
+    onAtTopChange: (Boolean) -> Unit,
     onAddSource: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -65,6 +70,21 @@ fun HomeScreen(
         listOf("Recently added movies" to it.movies, "Recently added series" to it.series)
             .filter { row -> row.second.isNotEmpty() }
     } ?: emptyList()
+
+    // Tell the app when we are at the very top so it can hide or show the dock.
+    // Two thresholds (leave at 80px, return at 8px) stop it flickering near the edge.
+    LaunchedEffect(listState) {
+        var atTop = true
+        onAtTopChange(true)
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val next = if (atTop) !(index > 0 || offset > 80) else (index == 0 && offset <= 8)
+                if (next != atTop) {
+                    atTop = next
+                    onAtTopChange(next)
+                }
+            }
+    }
 
     // Whenever the dock has focus, show the full hero behind it.
     LaunchedEffect(dockHasFocus) {
@@ -116,10 +136,10 @@ fun HomeScreen(
                     )
                 }
 
-                HomeState.Failed -> item {
+                is HomeState.Failed -> item {
                     HeroMessage(
                         title = "Unable to connect to this source.",
-                        message = "Check your connection and try again.",
+                        message = state.message,
                         primaryLabel = "Retry",
                         onPrimary = onRetry,
                         contentFocus = contentFocus,
@@ -150,6 +170,8 @@ fun HomeScreen(
                                 onDown = { if (rows.isNotEmpty()) goToRow(0) },
                                 onFocused = { scope.launch { listState.animateScrollToItem(0) } },
                                 label = state.content.heroLabel,
+                                autoRotate = autoRotate,
+                                onOpenDetails = onOpenDetails,
                                 modifier = Modifier.fillParentMaxHeight(),
                             )
                         }
@@ -159,6 +181,8 @@ fun HomeScreen(
                                 CompositionLocalProvider(LocalBringIntoViewSpec provides defaultSpec) {
                                     PosterRow(
                                         items = row.second,
+                                        showRatings = showRatings,
+                                        onOpen = onOpenDetails,
                                         firstFocus = rowFocus[k],
                                         onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
                                         onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
@@ -176,6 +200,8 @@ fun HomeScreen(
 @Composable
 private fun PosterRow(
     items: List<MediaItem>,
+    showRatings: Boolean,
+    onOpen: (MediaItem) -> Unit,
     firstFocus: FocusRequester,
     onUp: () -> Unit,
     onDown: () -> Unit,
@@ -194,9 +220,11 @@ private fun PosterRow(
         items(items) { m ->
             PosterCard(
                 title = m.title,
-                subtitle = listOfNotNull(m.year, m.rating?.let { "★ $it" }).joinToString(" · "),
+                subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
+                    .joinToString(" · "),
                 hue = hueOf(m.title),
                 imageUrl = m.posterUrl,
+                onClick = { onOpen(m) },
             )
         }
     }

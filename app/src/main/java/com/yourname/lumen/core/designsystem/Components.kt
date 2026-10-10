@@ -37,6 +37,7 @@ fun LumenText(
     )
 }
 
+/** Glass button. [primary] is a slightly brighter glass for the main action on a screen. */
 @Composable
 fun LumenButton(
     text: String,
@@ -45,19 +46,40 @@ fun LumenButton(
     onClick: () -> Unit = {},
     onFocusChange: (Boolean) -> Unit = {},
 ) {
-    val colors = LumenTheme.colors
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
     Box(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = shape, onFocusChange = onFocusChange)
-            .background(if (primary) Color.White else colors.surfaceHigh)
+            .glass(shape, strong = primary)
             .padding(horizontal = 22.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         LumenText(
             text = text,
             style = LumenTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
-            color = if (primary) Color.Black else colors.textPrimary,
+            color = Color.White,
+        )
+    }
+}
+
+/** Small round glass button holding a single character, such as the info "i". */
+@Composable
+fun LumenCircleButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .tvFocusable(onClick = onClick, shape = CircleShape)
+            .glass(CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        LumenText(
+            text = text,
+            style = LumenTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Color.White,
         )
     }
 }
@@ -100,26 +122,5 @@ fun LogoTile(initial: String, modifier: Modifier = Modifier) {
 fun hueColor(hue: Float, saturation: Float, value: Float): Color =
     Color(android.graphics.Color.HSVToColor(floatArrayOf(hue % 360f, saturation, value)))
 
-/** A stable color hue for a title, used for the soft glow behind the hero. */
+/** A stable color hue for a title, used for placeholder tiles while artwork loads. */
 fun hueOf(text: String): Float = (kotlin.math.abs(text.hashCode()) % 360).toFloat()
-
-/** Small round button holding a single character, such as the info "i". */
-@Composable
-fun LumenCircleButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit = {},
-) {
-    Box(
-        modifier = modifier
-            .size(40.dp)
-            .tvFocusable(onClick = onClick, shape = CircleShape)
-            .background(Color(0x33FFFFFF)),
-        contentAlignment = Alignment.Center,
-    ) {
-        LumenText(
-            text = text,
-            style = LumenTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
-        )
-    }
-}

@@ -34,12 +34,6 @@ data class LumenTypography(
     val label: TextStyle,
 )
 
-/**
- * Global size of the whole interface. 1.0 = Android default, lower = smaller and more compact.
- * Scales every dp and sp in the app at once.
- */
-const val UiScale = 1.0f
-
 object Dimens {
     val ScreenPadding = 48.dp
     val CardRadius = 12.dp
@@ -82,10 +76,11 @@ object LumenTheme {
 }
 
 @Composable
-fun LumenTheme(content: @Composable () -> Unit) {
+/** [uiScale] scales every dp and sp in the app at once. 1.0 = normal. */
+fun LumenTheme(uiScale: Float = 1f, content: @Composable () -> Unit) {
     val base = LocalDensity.current
     CompositionLocalProvider(
-        LocalDensity provides Density(density = base.density * UiScale, fontScale = base.fontScale),
+        LocalDensity provides Density(density = base.density * uiScale, fontScale = base.fontScale),
         LocalLumenColors provides DarkColors,
         LocalLumenTypography provides DefaultTypography,
         content = content,

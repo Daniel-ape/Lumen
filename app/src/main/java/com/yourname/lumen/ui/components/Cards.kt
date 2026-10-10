@@ -25,6 +25,7 @@ import com.yourname.lumen.core.designsystem.LogoTile
 import com.yourname.lumen.core.designsystem.LumenProgressBar
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
+import com.yourname.lumen.core.designsystem.glass
 import com.yourname.lumen.core.designsystem.hueColor
 import com.yourname.lumen.core.designsystem.tvFocusable
 
@@ -41,7 +42,7 @@ fun ChannelCard(
         modifier = modifier
             .width(260.dp)
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(Dimens.CardRadius))
-            .background(colors.surface)
+            .glass(RoundedCornerShape(Dimens.CardRadius))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

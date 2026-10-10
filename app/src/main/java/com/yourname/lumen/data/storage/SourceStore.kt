@@ -39,11 +39,15 @@ class SourceStore(context: Context) {
                 baseUrl = o.optString("url"),
                 username = o.optString("user"),
                 password = o.optString("pass"),
+                lastCheckedAt = o.optLong("checked", 0L),
+                lastError = o.optString("error", "").takeIf { it.isNotBlank() },
             )
         }
     }
 
     fun add(source: Source) = save(load() + source)
+
+    fun update(source: Source) = save(load().map { if (it.id == source.id) source else it })
 
     fun remove(id: String) = save(load().filterNot { it.id == id })
 
@@ -56,7 +60,9 @@ class SourceStore(context: Context) {
                     .put("name", it.name)
                     .put("url", it.baseUrl)
                     .put("user", it.username)
-                    .put("pass", it.password),
+                    .put("pass", it.password)
+                    .put("checked", it.lastCheckedAt)
+                    .put("error", it.lastError ?: ""),
             )
         }
         prefs.edit().putString(KEY, arr.toString()).apply()
