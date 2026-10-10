@@ -56,7 +56,6 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.animation)
     implementation(libs.coil.compose)
-    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.compose.ui.tooling)

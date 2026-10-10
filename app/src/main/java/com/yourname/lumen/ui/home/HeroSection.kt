@@ -54,6 +54,17 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import kotlinx.coroutines.delay
 
+/** Fades the bottom of whatever it is applied to into transparency, so it melts into the page. */
+private fun Modifier.fadeBottom(): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.verticalGradient(0.55f to Color.Black, 1f to Color.Transparent),
+            blendMode = BlendMode.DstIn,
+        )
+    }
+
 private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
 
 /** Full-screen hero with high-quality artwork that fades into the black page below. */
@@ -91,19 +102,9 @@ fun HeroSection(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    // Melts the artwork into the black page. A plain gradient is far cheaper to draw
-                    // than masking the whole picture.
-                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.5f to Color.Transparent,
-                                    1f to LumenTheme.colors.background,
-                                ),
-                            ),
+                            .fadeBottom(),
                     )
                 }
                 Column(
