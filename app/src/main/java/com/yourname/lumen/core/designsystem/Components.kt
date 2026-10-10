@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -101,3 +102,24 @@ fun hueColor(hue: Float, saturation: Float, value: Float): Color =
 
 /** A stable color hue for a title, used for the soft glow behind the hero. */
 fun hueOf(text: String): Float = (kotlin.math.abs(text.hashCode()) % 360).toFloat()
+
+/** Small round button holding a single character, such as the info "i". */
+@Composable
+fun LumenCircleButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .tvFocusable(onClick = onClick, shape = CircleShape)
+            .background(Color(0x33FFFFFF)),
+        contentAlignment = Alignment.Center,
+    ) {
+        LumenText(
+            text = text,
+            style = LumenTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+        )
+    }
+}

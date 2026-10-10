@@ -25,6 +25,7 @@ data class HomeContent(
     val hero: List<MediaItem>,
     val movies: List<MediaItem>,
     val series: List<MediaItem>,
+    val heroLabel: String = "Recently added",
 )
 
 sealed interface HomeState {

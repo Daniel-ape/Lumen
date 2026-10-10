@@ -44,7 +44,6 @@ fun HomeScreen(
     dockFocus: FocusRequester,
     contentFocus: FocusRequester,
     dockHasFocus: Boolean,
-    onAmbient: (String?) -> Unit,
     onAddSource: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -150,7 +149,7 @@ fun HomeScreen(
                                 onUp = goToDock,
                                 onDown = { if (rows.isNotEmpty()) goToRow(0) },
                                 onFocused = { scope.launch { listState.animateScrollToItem(0) } },
-                                onAmbient = onAmbient,
+                                label = state.content.heroLabel,
                                 modifier = Modifier.fillParentMaxHeight(),
                             )
                         }

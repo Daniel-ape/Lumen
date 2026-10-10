@@ -66,7 +66,9 @@ class XtreamClient(private val source: Source) {
         val series = seriesResult.getOrDefault(emptyList())
 
         // Movies only have a small poster in the list, so ask for the big backdrop of the few we feature.
-        val heroMovies = movies.take(3).map { async { withDetails(it) } }.awaitAll()
+        // Check a few more movies and keep the ones that have a proper wide backdrop.
+        val movieCandidates = movies.take(6).map { async { withDetails(it) } }.awaitAll()
+        val heroMovies = movieCandidates.filter { it.backdropUrl != null }.ifEmpty { movieCandidates }.take(3)
         val heroSeries = (series.filter { it.backdropUrl != null }.ifEmpty { series }).take(2)
 
         val hero = buildList {
@@ -121,7 +123,7 @@ class XtreamClient(private val source: Source) {
                     rating = ratingOf(o.optString("rating")),
                     plot = o.str("plot"),
                     posterUrl = o.str("cover"),
-                    backdropUrl = o.firstOf("backdrop_path"),
+                    backdropUrl = o.firstOf("backdrop_path")?.let { upgradeImage(it) },
                 )
             }
     }
@@ -132,7 +134,7 @@ class XtreamClient(private val source: Source) {
             item
         } else {
             item.copy(
-                backdropUrl = info.firstOf("backdrop_path"),
+                backdropUrl = info.firstOf("backdrop_path")?.let { upgradeImage(it) },
                 plot = info.str("plot") ?: info.str("description"),
                 year = item.year ?: info.str("releasedate")?.take(4),
             )
@@ -168,3 +170,8 @@ private fun yearOf(raw: String, field: String): String? =
 
 private fun ratingOf(raw: String): String? =
     raw.toDoubleOrNull()?.takeIf { it > 0 }?.let { "%.1f".format(it) }
+
+// Many providers serve TMDB images in a small size. Ask for the full-size version when we can.
+private val tmdbImageSize = Regex("""/t/p/w\d+/""")
+
+private fun upgradeImage(url: String): String = tmdbImageSize.replace(url, "/t/p/original/")

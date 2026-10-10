@@ -52,7 +52,7 @@ fun Modifier.tvFocusable(
             scaleX = scale
             scaleY = scale
         }
-        .border(2.dp, borderColor, shape)
+        .then(if (focused) Modifier.border(2.dp, borderColor, shape) else Modifier)
         .clip(shape)
         .clickable(
             interactionSource = remember { MutableInteractionSource() },

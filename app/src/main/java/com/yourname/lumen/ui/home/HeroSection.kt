@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.yourname.lumen.core.designsystem.Dimens
 import com.yourname.lumen.core.designsystem.LumenButton
+import com.yourname.lumen.core.designsystem.LumenCircleButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.hueColor
@@ -53,39 +54,22 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import kotlinx.coroutines.delay
 
-/** Fades the bottom of whatever it is applied to into transparency, so it melts into the page. */
-private fun Modifier.fadeBottom(): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        drawRect(
-            brush = Brush.verticalGradient(0.55f to Color.Black, 1f to Color.Transparent),
-            blendMode = BlendMode.DstIn,
-        )
-    }
-
 private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
 
-/** Full-screen hero. Artwork comes from the user's own source. */
+/** Full-screen hero with high-quality artwork that fades into the black page below. */
 @Composable
 fun HeroSection(
     items: List<MediaItem>,
+    label: String,
     contentFocus: FocusRequester,
     onUp: () -> Unit,
     onDown: () -> Unit,
     onFocused: () -> Unit,
-    onAmbient: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LumenTheme.colors
     val type = LumenTheme.typography
     var index by remember { mutableIntStateOf(0) }
     var paused by remember { mutableStateOf(false) }
-
-    LaunchedEffect(index) {
-        val current = items[index]
-        onAmbient(current.backdropUrl ?: current.posterUrl)
-    }
 
     // Auto-rotate every 8s, but never while a hero button has focus.
     LaunchedEffect(paused) {
@@ -107,20 +91,17 @@ fun HeroSection(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.TopCenter,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .fadeBottom(),
+                        modifier = Modifier.fillMaxSize(),
                     )
-                } else {
+                    // Melts the artwork into the black page. A plain gradient is far cheaper to draw
+                    // than masking the whole picture.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(
-                                        hueColor(hueOf(item.title), 0.5f, 0.4f).copy(alpha = 0.45f),
-                                        Color.Transparent,
-                                    ),
+                                    0.5f to Color.Transparent,
+                                    1f to LumenTheme.colors.background,
                                 ),
                             ),
                     )
@@ -128,18 +109,18 @@ fun HeroSection(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = Dimens.ScreenPadding, bottom = 108.dp)
-                        .widthIn(max = 560.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                        .padding(start = Dimens.ScreenPadding, bottom = 92.dp)
+                        .widthIn(max = 460.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     LumenText(
-                        "Recently added",
-                        type.label.copy(shadow = TextShadow),
-                        color = Color.White.copy(alpha = 0.8f),
+                        label,
+                        type.label.copy(fontSize = 11.sp, shadow = TextShadow),
+                        color = Color.White.copy(alpha = 0.75f),
                     )
                     LumenText(
                         item.title,
-                        type.display.copy(fontSize = 36.sp, lineHeight = 40.sp, shadow = TextShadow),
+                        type.title.copy(fontSize = 24.sp, lineHeight = 28.sp, shadow = TextShadow),
                         maxLines = 2,
                     )
                     val meta = listOfNotNull(
@@ -149,13 +130,14 @@ fun HeroSection(
                     ).joinToString(" · ")
                     LumenText(
                         meta,
-                        type.label.copy(shadow = TextShadow),
+                        type.label.copy(fontSize = 12.sp, shadow = TextShadow),
                         color = Color.White.copy(alpha = 0.8f),
                     )
                     if (!item.plot.isNullOrBlank()) {
                         LumenText(
                             item.plot,
-                            type.body.copy(fontSize = 15.sp, lineHeight = 21.sp, shadow = TextShadow),
+                            type.body.copy(fontSize = 13.sp, lineHeight = 18.sp, shadow = TextShadow),
+                            color = Color.White.copy(alpha = 0.9f),
                             maxLines = 2,
                         )
                     }
@@ -174,28 +156,30 @@ fun HeroSection(
                     if (it.hasFocus) onFocused()
                 }
                 .focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             LumenButton(
-                text = "Watch",
+                text = "Play",
                 modifier = Modifier.focusRequester(contentFocus),
                 primary = true,
             )
-            LumenButton("More info")
+            LumenCircleButton(text = "i")
         }
 
+        // Small progress dots, centered along the bottom of the hero.
         Row(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = Dimens.ScreenPadding, bottom = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             items.indices.forEach { dot ->
                 Box(
                     modifier = Modifier
-                        .size(width = 22.dp, height = 4.dp)
+                        .size(width = 14.dp, height = 3.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(if (dot == index) Color.White else Color.White.copy(alpha = 0.25f)),
+                        .background(if (dot == index) Color.White else Color.White.copy(alpha = 0.3f)),
                 )
             }
         }
