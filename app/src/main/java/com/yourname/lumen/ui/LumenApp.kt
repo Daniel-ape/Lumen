@@ -32,6 +32,7 @@ import coil.imageLoader
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.diagnostics.AppLog
 import com.yourname.lumen.data.home.loadHomeState
+import com.yourname.lumen.data.live.loadLiveState
 import com.yourname.lumen.data.settings.AppSettings
 import com.yourname.lumen.data.storage.SourceStore
 import com.yourname.lumen.data.xtream.XtreamClient
@@ -40,12 +41,17 @@ import com.yourname.lumen.data.xtream.normalizeServerUrl
 import com.yourname.lumen.data.xtream.validateServerUrl
 import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.HomeState
+import com.yourname.lumen.domain.model.LiveChannel
+import com.yourname.lumen.domain.model.LiveState
+import com.yourname.lumen.domain.model.favoriteKey
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.Source
 import com.yourname.lumen.ui.boot.BootScreen
 import com.yourname.lumen.ui.common.PlaceholderScreen
 import com.yourname.lumen.ui.details.DetailsScreen
 import com.yourname.lumen.ui.home.HomeScreen
+import com.yourname.lumen.ui.live.LiveTvScreen
+import com.yourname.lumen.ui.player.PlayerScreen
 import com.yourname.lumen.ui.navigation.DockSlot
 import com.yourname.lumen.ui.navigation.LumenDock
 import com.yourname.lumen.ui.navigation.Section
@@ -72,6 +78,13 @@ fun LumenApp(settings: AppSettings) {
     var reconnectingId by remember { mutableStateOf<String?>(null) }
     var imageCacheBytes by remember { mutableLongStateOf(0L) }
     var cacheVersion by remember { mutableIntStateOf(0) }
+
+    // ----- live TV
+    var liveState by remember { mutableStateOf<LiveState>(LiveState.Loading) }
+    var liveKey by remember { mutableStateOf<Pair<Source?, Int>?>(null) }
+    var focusedChannelId by remember { mutableStateOf<String?>(null) }
+    var playing by remember { mutableStateOf<PlayRequest?>(null) }
+    val client = remember(activeSource) { activeSource?.let { XtreamClient(it) } }
 
     // ----- screens
     var section by remember { mutableStateOf(Section.Home) }
@@ -108,6 +121,15 @@ fun LumenApp(settings: AppSettings) {
         if (homeState is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
     }
 
+    // The channel list is loaded the first time Live TV is opened, and again after a refresh or source change.
+    LaunchedEffect(section, loadKey, retryKey) {
+        if (section == Section.LiveTv && liveKey != (loadKey to retryKey)) {
+            liveState = LiveState.Loading
+            liveState = loadLiveState(activeSource)
+            liveKey = loadKey to retryKey
+        }
+    }
+
     // Optional automatic refresh while the app stays open.
     LaunchedEffect(settings.autoRefreshHours) {
         val hours = settings.autoRefreshHours
@@ -127,8 +149,9 @@ fun LumenApp(settings: AppSettings) {
     }
 
     // Put focus on the page once it has something to focus, without stealing it from the dock.
-    LaunchedEffect(showAddSource, detailsItem, homeState, section) {
-        if (!showAddSource && detailsItem == null && homeState !is HomeState.Loading && !dockHasFocus) {
+    LaunchedEffect(showAddSource, detailsItem, homeState, liveState, section, playing) {
+        val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
+        if (!showAddSource && detailsItem == null && playing == null && ready && !dockHasFocus) {
             runCatching { contentFocus.requestFocus() }
         }
     }
@@ -137,10 +160,10 @@ fun LumenApp(settings: AppSettings) {
     LaunchedEffect(section) {
         if (section != Section.Home) homeAtTop = true
     }
-    val dockVisible = section != Section.Home || homeAtTop || dockHasFocus || dockForced
+    val dockVisible = playing == null && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
 
     // Back from content brings the dock back and moves focus to it; Back on the dock leaves the app.
-    BackHandler(enabled = !dockHasFocus && !showAddSource && detailsItem == null) {
+    BackHandler(enabled = !dockHasFocus && !showAddSource && detailsItem == null && playing == null) {
         dockForced = true
     }
     LaunchedEffect(dockForced) {
@@ -286,6 +309,26 @@ fun LumenApp(settings: AppSettings) {
                             contentFocus = contentFocus,
                         )
 
+                        Section.LiveTv -> LiveTvScreen(
+                            state = liveState,
+                            sourceId = activeSource?.id ?: "",
+                            favorites = settings.favoriteChannels,
+                            focusedChannelId = focusedChannelId,
+                            onFocusChannel = { focusedChannelId = it.id },
+                            onToggleFavorite = { channel ->
+                                activeSource?.let { settings.toggleFavoriteChannel(favoriteKey(it.id, channel)) }
+                            },
+                            onPlay = { channels, index -> playing = PlayRequest(channels, index) },
+                            loadNowNext = { channel -> client?.shortEpg(channel.id) },
+                            dockFocus = dockFocus,
+                            contentFocus = contentFocus,
+                            onAddSource = {
+                                editingSource = null
+                                showAddSource = true
+                            },
+                            onRetry = { retryKey++ },
+                        )
+
                         else -> PlaceholderScreen(current)
                     }
                 }
@@ -309,6 +352,18 @@ fun LumenApp(settings: AppSettings) {
             }
         }
 
+        val request = playing
+        if (request != null && client != null) {
+            PlayerScreen(
+                channels = request.channels,
+                startIndex = request.index,
+                streamUrl = { channel, extension -> client.liveUrl(channel.id, extension) },
+                loadNowNext = { channel -> client.shortEpg(channel.id) },
+                onChannelChanged = { focusedChannelId = it.id },
+                onClose = { playing = null },
+            )
+        }
+
         AnimatedVisibility(
             visible = !booted,
             exit = fadeOut(animationSpec = tween(400)),
@@ -317,3 +372,6 @@ fun LumenApp(settings: AppSettings) {
         }
     }
 }
+
+/** A channel list and which channel to start on. Up and Down in the player move through [channels]. */
+private data class PlayRequest(val channels: List<LiveChannel>, val index: Int)

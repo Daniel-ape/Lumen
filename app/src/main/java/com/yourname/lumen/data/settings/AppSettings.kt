@@ -24,6 +24,8 @@ class AppSettings(context: Context) {
         private set
     var activeSourceId by mutableStateOf<String?>(prefs.getString(KEY_ACTIVE, null))
         private set
+    var favoriteChannels by mutableStateOf<Set<String>>(prefs.getStringSet(KEY_FAVORITES, null)?.toSet() ?: emptySet())
+        private set
 
     fun updateUiScale(value: Float) {
         uiScale = value
@@ -50,7 +52,14 @@ class AppSettings(context: Context) {
         prefs.edit().putString(KEY_ACTIVE, id).apply()
     }
 
+    fun toggleFavoriteChannel(key: String) {
+        val next = if (key in favoriteChannels) favoriteChannels - key else favoriteChannels + key
+        favoriteChannels = next
+        prefs.edit().putStringSet(KEY_FAVORITES, next).apply()
+    }
+
     private companion object {
+        const val KEY_FAVORITES = "favorite_channels"
         const val KEY_SCALE = "ui_scale"
         const val KEY_RATINGS = "show_ratings"
         const val KEY_ROTATE = "hero_auto_rotate"

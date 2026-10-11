@@ -57,3 +57,40 @@ sealed interface HomeState {
     data class Failed(val message: String) : HomeState
     data class Ready(val content: HomeContent) : HomeState
 }
+
+// ---------- Live TV
+
+data class LiveCategory(val id: String, val name: String)
+
+data class LiveChannel(
+    val id: String,
+    val number: Int,
+    val name: String,
+    val logoUrl: String?,
+    val categoryId: String,
+)
+
+data class LiveContent(
+    val categories: List<LiveCategory>,
+    val channels: List<LiveChannel>,
+)
+
+/** One program from the source's guide data. Times are seconds since 1970, or null when unknown. */
+data class ProgramInfo(
+    val title: String,
+    val description: String?,
+    val startSec: Long?,
+    val endSec: Long?,
+)
+
+data class NowNext(val now: ProgramInfo?, val next: ProgramInfo?)
+
+sealed interface LiveState {
+    data object Loading : LiveState
+    data object NoSource : LiveState
+    data class Failed(val message: String) : LiveState
+    data class Ready(val content: LiveContent) : LiveState
+}
+
+/** Favorites are saved per source, so two providers can't mix up channel ids. */
+fun favoriteKey(sourceId: String, channel: LiveChannel): String = "$sourceId:${channel.id}"

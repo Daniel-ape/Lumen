@@ -1,7 +1,13 @@
 package com.yourname.lumen.data.xtream
 
 import com.yourname.lumen.domain.model.ConnectionResult
+import android.util.Base64
 import com.yourname.lumen.domain.model.HomeContent
+import com.yourname.lumen.domain.model.LiveCategory
+import com.yourname.lumen.domain.model.LiveChannel
+import com.yourname.lumen.domain.model.LiveContent
+import com.yourname.lumen.domain.model.NowNext
+import com.yourname.lumen.domain.model.ProgramInfo
 import com.yourname.lumen.domain.model.MediaDetails
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
@@ -156,6 +162,75 @@ class XtreamClient(private val source: Source) {
         }
     }
 
+    // ---------- Live TV
+
+    suspend fun loadLive(): LiveContent = coroutineScope {
+        val categoriesJob = async { runCatching { liveCategories() } }
+        val channels = liveChannels()
+        LiveContent(categoriesJob.await().getOrDefault(emptyList()), channels)
+    }
+
+    private suspend fun liveCategories(): List<LiveCategory> = withContext(Dispatchers.Default) {
+        val arr = JSONArray(fetch(url("get_live_categories")))
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val id = o.optString("category_id")
+            val name = o.optString("category_name").trim()
+            if (id.isBlank() || name.isEmpty()) null else LiveCategory(id, name)
+        }
+    }
+
+    private suspend fun liveChannels(): List<LiveChannel> = withContext(Dispatchers.Default) {
+        val arr = JSONArray(fetch(url("get_live_streams")))
+        val out = ArrayList<LiveChannel>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("stream_id")
+            val name = cleanChannelName(o.optString("name"))
+            if (id.isBlank() || name.isEmpty()) continue
+            out.add(
+                LiveChannel(
+                    id = id,
+                    number = o.optInt("num", out.size + 1),
+                    name = name,
+                    logoUrl = o.str("stream_icon"),
+                    categoryId = o.optString("category_id"),
+                ),
+            )
+        }
+        out
+    }
+
+    /** Current and next program for one channel, from the server's short guide. */
+    suspend fun shortEpg(streamId: String): NowNext = withContext(Dispatchers.Default) {
+        val root = JSONObject(fetch(url("get_short_epg", "stream_id" to streamId, "limit" to "3")))
+        val list = root.optJSONArray("epg_listings") ?: return@withContext NowNext(null, null)
+        val items = (0 until list.length())
+            .mapNotNull { list.optJSONObject(it) }
+            .map { o ->
+                ProgramInfo(
+                    title = decodeBase64(o.optString("title")),
+                    description = decodeBase64(o.optString("description")).takeIf { it.isNotBlank() },
+                    startSec = o.optString("start_timestamp").toLongOrNull(),
+                    endSec = o.optString("stop_timestamp").toLongOrNull(),
+                )
+            }
+            .filter { it.title.isNotBlank() }
+        val nowSec = System.currentTimeMillis() / 1000
+        val current = items.indexOfFirst { p ->
+            p.startSec != null && p.endSec != null && p.startSec <= nowSec && nowSec < p.endSec
+        }
+        if (current >= 0) {
+            NowNext(items[current], items.getOrNull(current + 1))
+        } else {
+            NowNext(items.firstOrNull(), items.getOrNull(1))
+        }
+    }
+
+    /** Address of a live stream. Contains the login, so never log it. */
+    fun liveUrl(streamId: String, extension: String): String =
+        "$base/live/${enc(source.username)}/${enc(source.password)}/$streamId.$extension"
+
     private suspend fun newestMovies(): List<MediaItem> = withContext(Dispatchers.Default) {
         val arr = JSONArray(fetch(url("get_vod_streams")))
         val raw = ArrayList<JSONObject>()
@@ -267,3 +342,12 @@ private fun ratingOf(raw: String): String? =
 private val tmdbImageSize = Regex("""/t/p/w\d+/""")
 
 private fun upgradeImage(url: String): String = tmdbImageSize.replace(url, "/t/p/original/")
+
+private fun decodeBase64(raw: String): String =
+    runCatching { String(Base64.decode(raw, Base64.DEFAULT), Charsets.UTF_8) }.getOrDefault(raw).trim()
+
+private fun cleanChannelName(raw: String): String {
+    var t = raw.trim()
+    repeat(3) { t = tagPrefix.replace(t, "") }
+    return t.trim().ifEmpty { raw.trim() }
+}
