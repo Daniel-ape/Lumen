@@ -42,7 +42,7 @@ object Dimens {
 }
 
 private val DarkColors = LumenColors(
-    background = Color(0xFF070708),
+    background = Color(0xFF14161A),
     surface = Color(0x0FFFFFFF),
     surfaceHigh = Color(0x1FFFFFFF),
     dock = Color(0xE61E1E24),

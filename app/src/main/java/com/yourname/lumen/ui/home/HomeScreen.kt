@@ -153,7 +153,7 @@ fun HomeScreen(
                         item {
                             HeroMessage(
                                 title = "Nothing here yet",
-                                message = "No movies or series were found on this source.",
+                                message = "No movies or series were found on this source. Live channels are under Live TV.",
                                 primaryLabel = null,
                                 onPrimary = {},
                                 contentFocus = contentFocus,

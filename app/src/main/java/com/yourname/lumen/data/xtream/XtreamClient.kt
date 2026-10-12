@@ -1,5 +1,6 @@
 package com.yourname.lumen.data.xtream
 
+import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.domain.model.ConnectionResult
 import android.util.Base64
 import com.yourname.lumen.domain.model.HomeContent
@@ -36,7 +37,9 @@ import org.json.JSONObject
  * Posters and backdrops come straight from the provider.
  * Never log URLs from here: they contain the username and password.
  */
-class XtreamClient(private val source: Source) {
+class XtreamClient(private val source: Source) : SourceClient {
+
+    override val supportsStreamFormats: Boolean = true
 
     private val base = source.baseUrl.trimEnd('/')
 
@@ -70,7 +73,7 @@ class XtreamClient(private val source: Source) {
     }
 
     /** Tests the connection and explains a failure in plain words. */
-    suspend fun checkConnection(): ConnectionResult = try {
+    override suspend fun checkConnection(): ConnectionResult = try {
         if (authenticate()) {
             ConnectionResult.Connected
         } else {
@@ -82,7 +85,7 @@ class XtreamClient(private val source: Source) {
         ConnectionResult.Failed(describeFailure(e))
     }
 
-    suspend fun loadHome(): HomeContent = coroutineScope {
+    override suspend fun loadHome(): HomeContent = coroutineScope {
         val moviesJob = async { runCatching { newestMovies() } }
         val seriesJob = async { runCatching { newestSeries() } }
         val moviesResult = moviesJob.await()
@@ -109,7 +112,7 @@ class XtreamClient(private val source: Source) {
     }
 
     /** Full details for the details page. Falls back to what we already know if the server won't say more. */
-    suspend fun loadDetails(item: MediaItem): MediaDetails = withContext(Dispatchers.Default) {
+    override suspend fun loadDetails(item: MediaItem): MediaDetails = withContext(Dispatchers.Default) {
         val basic = MediaDetails(
             title = item.title,
             type = item.type,
@@ -164,7 +167,7 @@ class XtreamClient(private val source: Source) {
 
     // ---------- Live TV
 
-    suspend fun loadLive(): LiveContent = coroutineScope {
+    override suspend fun loadLive(): LiveContent = coroutineScope {
         val categoriesJob = async { runCatching { liveCategories() } }
         val channels = liveChannels()
         LiveContent(categoriesJob.await().getOrDefault(emptyList()), channels)
@@ -201,20 +204,13 @@ class XtreamClient(private val source: Source) {
         out
     }
 
-    /** Current and next program for one channel, from the server's short guide. */
-    suspend fun shortEpg(streamId: String): NowNext = withContext(Dispatchers.Default) {
-        val root = JSONObject(fetch(url("get_short_epg", "stream_id" to streamId, "limit" to "3")))
+    /** Current and next programme for one channel, from the server's short guide. */
+    override suspend fun shortEpg(channel: LiveChannel, offsetSec: Long): NowNext = withContext(Dispatchers.Default) {
+        val root = JSONObject(fetch(url("get_short_epg", "stream_id" to channel.id, "limit" to "3")))
         val list = root.optJSONArray("epg_listings") ?: return@withContext NowNext(null, null)
         val items = (0 until list.length())
             .mapNotNull { list.optJSONObject(it) }
-            .map { o ->
-                ProgramInfo(
-                    title = decodeBase64(o.optString("title")),
-                    description = decodeBase64(o.optString("description")).takeIf { it.isNotBlank() },
-                    startSec = o.optString("start_timestamp").toLongOrNull(),
-                    endSec = o.optString("stop_timestamp").toLongOrNull(),
-                )
-            }
+            .map { toProgram(it, offsetSec) }
             .filter { it.title.isNotBlank() }
         val nowSec = System.currentTimeMillis() / 1000
         val current = items.indexOfFirst { p ->
@@ -227,9 +223,30 @@ class XtreamClient(private val source: Source) {
         }
     }
 
+    /** Upcoming programmes for one channel (today's guide, from now on). */
+    override suspend fun schedule(channel: LiveChannel, offsetSec: Long): List<ProgramInfo> =
+        withContext(Dispatchers.Default) {
+            val root = JSONObject(fetch(url("get_simple_data_table", "stream_id" to channel.id)))
+            val list = root.optJSONArray("epg_listings") ?: return@withContext emptyList()
+            val nowSec = System.currentTimeMillis() / 1000
+            (0 until list.length())
+                .mapNotNull { list.optJSONObject(it) }
+                .map { toProgram(it, offsetSec) }
+                .filter { it.title.isNotBlank() && (it.endSec == null || it.endSec > nowSec) }
+                .sortedBy { it.startSec ?: Long.MAX_VALUE }
+                .take(12)
+        }
+
+    private fun toProgram(o: JSONObject, offsetSec: Long): ProgramInfo = ProgramInfo(
+        title = decodeBase64(o.optString("title")),
+        description = decodeBase64(o.optString("description")).takeIf { it.isNotBlank() },
+        startSec = o.optString("start_timestamp").toLongOrNull()?.plus(offsetSec),
+        endSec = o.optString("stop_timestamp").toLongOrNull()?.plus(offsetSec),
+    )
+
     /** Address of a live stream. Contains the login, so never log it. */
-    fun liveUrl(streamId: String, extension: String): String =
-        "$base/live/${enc(source.username)}/${enc(source.password)}/$streamId.$extension"
+    override fun streamUrl(channel: LiveChannel, extension: String): String =
+        "$base/live/${enc(source.username)}/${enc(source.password)}/${channel.id}.$extension"
 
     private suspend fun newestMovies(): List<MediaItem> = withContext(Dispatchers.Default) {
         val arr = JSONArray(fetch(url("get_vod_streams")))

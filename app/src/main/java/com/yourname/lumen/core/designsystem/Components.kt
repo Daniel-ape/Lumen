@@ -19,6 +19,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun LumenText(
@@ -43,20 +44,24 @@ fun LumenButton(
     text: String,
     modifier: Modifier = Modifier,
     primary: Boolean = false,
+    compact: Boolean = false,
     onClick: () -> Unit = {},
     onFocusChange: (Boolean) -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(if (compact) 8.dp else 10.dp)
     Box(
         modifier = modifier
             .tvFocusable(onClick = onClick, shape = shape, onFocusChange = onFocusChange)
             .glass(shape, strong = primary)
-            .padding(horizontal = 22.dp, vertical = 9.dp),
+            .padding(horizontal = if (compact) 14.dp else 22.dp, vertical = if (compact) 6.dp else 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         LumenText(
             text = text,
-            style = LumenTheme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+            style = LumenTheme.typography.body.copy(
+                fontSize = if (compact) 13.sp else 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
             color = Color.White,
         )
     }

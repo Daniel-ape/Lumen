@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.yourname.lumen.domain.model.Source
+import com.yourname.lumen.domain.model.SourceType
 import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,6 +42,7 @@ class SourceStore(context: Context) {
                 password = o.optString("pass"),
                 lastCheckedAt = o.optLong("checked", 0L),
                 lastError = o.optString("error", "").takeIf { it.isNotBlank() },
+                type = runCatching { SourceType.valueOf(o.optString("type")) }.getOrDefault(SourceType.XTREAM),
             )
         }
     }
@@ -62,7 +64,8 @@ class SourceStore(context: Context) {
                     .put("user", it.username)
                     .put("pass", it.password)
                     .put("checked", it.lastCheckedAt)
-                    .put("error", it.lastError ?: ""),
+                    .put("error", it.lastError ?: "")
+                    .put("type", it.type.name),
             )
         }
         prefs.edit().putString(KEY, arr.toString()).apply()

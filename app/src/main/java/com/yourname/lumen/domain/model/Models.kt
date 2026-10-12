@@ -1,5 +1,11 @@
 package com.yourname.lumen.domain.model
 
+enum class SourceType(val label: String) {
+    XTREAM("Xtream Codes"),
+    M3U("M3U playlist"),
+    SELF_HOSTED("Self-hosted server"),
+}
+
 data class Source(
     val id: String,
     val name: String,
@@ -8,6 +14,7 @@ data class Source(
     val password: String,
     val lastCheckedAt: Long = 0L,
     val lastError: String? = null,
+    val type: SourceType = SourceType.XTREAM,
 )
 
 enum class MediaType { Movie, Series }
@@ -68,6 +75,8 @@ data class LiveChannel(
     val name: String,
     val logoUrl: String?,
     val categoryId: String,
+    /** Direct stream address, for sources (like M3U playlists) that list one per channel. */
+    val streamUrl: String? = null,
 )
 
 data class LiveContent(

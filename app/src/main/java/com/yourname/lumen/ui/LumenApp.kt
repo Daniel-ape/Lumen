@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -25,40 +26,51 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.imageLoader
+import com.yourname.lumen.core.designsystem.AppBackground
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.diagnostics.AppLog
+import com.yourname.lumen.data.epg.EpgCache
 import com.yourname.lumen.data.home.loadHomeState
 import com.yourname.lumen.data.live.loadLiveState
+import com.yourname.lumen.data.m3u.M3uClient
 import com.yourname.lumen.data.settings.AppSettings
+import com.yourname.lumen.data.source.clientFor
 import com.yourname.lumen.data.storage.SourceStore
-import com.yourname.lumen.data.xtream.XtreamClient
+import com.yourname.lumen.data.xtream.buildSelfHostedUrl
 import com.yourname.lumen.data.xtream.hostName
 import com.yourname.lumen.data.xtream.normalizeServerUrl
+import com.yourname.lumen.data.xtream.validatePlaylistLink
 import com.yourname.lumen.data.xtream.validateServerUrl
 import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.HomeState
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveState
-import com.yourname.lumen.domain.model.favoriteKey
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.Source
+import com.yourname.lumen.domain.model.SourceType
+import com.yourname.lumen.domain.model.favoriteKey
 import com.yourname.lumen.ui.boot.BootScreen
 import com.yourname.lumen.ui.common.PlaceholderScreen
 import com.yourname.lumen.ui.details.DetailsScreen
+import com.yourname.lumen.ui.guide.GuidePanel
 import com.yourname.lumen.ui.home.HomeScreen
 import com.yourname.lumen.ui.live.LiveTvScreen
-import com.yourname.lumen.ui.player.PlayerScreen
 import com.yourname.lumen.ui.navigation.DockSlot
 import com.yourname.lumen.ui.navigation.LumenDock
 import com.yourname.lumen.ui.navigation.Section
-import com.yourname.lumen.ui.settings.AddSourceScreen
+import com.yourname.lumen.ui.player.FullscreenControls
+import com.yourname.lumen.ui.player.PlaybackController
+import com.yourname.lumen.ui.player.VideoLayer
+import com.yourname.lumen.ui.settings.ConnectionFormScreen
 import com.yourname.lumen.ui.settings.SettingsActions
 import com.yourname.lumen.ui.settings.SettingsInfo
 import com.yourname.lumen.ui.settings.SettingsScreen
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,26 +81,41 @@ fun LumenApp(settings: AppSettings) {
     val store = remember { SourceStore(context.applicationContext) }
     val scope = rememberCoroutineScope()
 
-    // ----- data
+    // ----- connections
     var sources by remember { mutableStateOf(store.load()) }
     val activeSource = sources.firstOrNull { it.id == settings.activeSourceId } ?: sources.firstOrNull()
+    // Keyed on the connection details only, so testing a connection never restarts playback.
+    val loadKey = activeSource?.copy(lastCheckedAt = 0L, lastError = null)
+    val client = remember(loadKey) { activeSource?.let { clientFor(it) } }
+    var testingId by remember { mutableStateOf<String?>(null) }
+
+    // ----- content
     var homeState by remember { mutableStateOf<HomeState>(HomeState.Loading) }
+    var liveState by remember { mutableStateOf<LiveState>(LiveState.Loading) }
+    var liveKey by remember { mutableStateOf<Pair<Source?, Int>?>(null) }
     var retryKey by remember { mutableIntStateOf(0) }
     var lastRefreshAt by remember { mutableLongStateOf(0L) }
-    var reconnectingId by remember { mutableStateOf<String?>(null) }
     var imageCacheBytes by remember { mutableLongStateOf(0L) }
     var cacheVersion by remember { mutableIntStateOf(0) }
 
-    // ----- live TV
-    var liveState by remember { mutableStateOf<LiveState>(LiveState.Loading) }
-    var liveKey by remember { mutableStateOf<Pair<Source?, Int>?>(null) }
+    // Programme information shared by the list, the preview, the fullscreen bar and the guide.
+    var epgVersion by remember { mutableIntStateOf(0) }
+    val epg = remember(client, settings.epgOffsetMinutes, epgVersion) {
+        client?.let { EpgCache(it, settings.epgOffsetMinutes * 60L) }
+    }
+
+    // ----- playback: one player for the preview and fullscreen
+    val controller = remember { PlaybackController(context.applicationContext) }
+    DisposableEffect(controller) { onDispose { controller.release() } }
+    var fullscreen by remember { mutableStateOf(false) }
+    var fullscreenChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
+    var guideChannels by remember { mutableStateOf<List<LiveChannel>?>(null) }
+    var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var focusedChannelId by remember { mutableStateOf<String?>(null) }
-    var playing by remember { mutableStateOf<PlayRequest?>(null) }
-    val client = remember(activeSource) { activeSource?.let { XtreamClient(it) } }
 
     // ----- screens
     var section by remember { mutableStateOf(Section.Home) }
-    var showAddSource by remember { mutableStateOf(false) }
+    var formType by remember { mutableStateOf<SourceType?>(null) }
     var editingSource by remember { mutableStateOf<Source?>(null) }
     var detailsItem by remember { mutableStateOf<MediaItem?>(null) }
 
@@ -113,15 +140,14 @@ fun LumenApp(settings: AppSettings) {
         if (minElapsed && homeState !is HomeState.Loading) booted = true
     }
 
-    // Reload Home when the active source changes (not when only its status text changes) or on refresh.
-    val loadKey = activeSource?.copy(lastCheckedAt = 0L, lastError = null)
+    // Reload Home when the active connection changes (not when only its status text changes) or on refresh.
     LaunchedEffect(loadKey, retryKey) {
         homeState = HomeState.Loading
         homeState = loadHomeState(activeSource)
         if (homeState is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
     }
 
-    // The channel list is loaded the first time Live TV is opened, and again after a refresh or source change.
+    // The channel list loads the first time Live TV is opened, and again after a refresh or a switch.
     LaunchedEffect(section, loadKey, retryKey) {
         if (section == Section.LiveTv && liveKey != (loadKey to retryKey)) {
             liveState = LiveState.Loading
@@ -136,22 +162,37 @@ fun LumenApp(settings: AppSettings) {
         if (hours > 0) {
             while (true) {
                 delay(hours * 3_600_000L)
+                epgVersion++
                 retryKey++
             }
         }
     }
 
-    // Image cache size for the Settings screen.
+    // Image cache size for Settings.
     LaunchedEffect(section, cacheVersion) {
         if (section == Section.Settings) {
             imageCacheBytes = context.imageLoader.diskCache?.size ?: 0L
         }
     }
 
-    // Put focus on the page once it has something to focus, without stealing it from the dock.
-    LaunchedEffect(showAddSource, detailsItem, homeState, liveState, section, playing) {
+    // ----- player housekeeping
+    LaunchedEffect(client) {
+        // A different connection means different channels: stop whatever was playing.
+        controller.stop()
+        fullscreen = false
+        guideChannels = null
+    }
+    LaunchedEffect(section, fullscreen) {
+        if (section != Section.LiveTv && !fullscreen) controller.stop()
+    }
+    LaunchedEffect(settings.previewSound, fullscreen) {
+        controller.setMuted(!fullscreen && !settings.previewSound)
+    }
+
+    // Put focus on the page once it has something to focus, without stealing it from the dock or the player.
+    LaunchedEffect(formType, detailsItem, homeState, liveState, section, fullscreen, guideChannels) {
         val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
-        if (!showAddSource && detailsItem == null && playing == null && ready && !dockHasFocus) {
+        if (formType == null && detailsItem == null && !fullscreen && guideChannels == null && ready && !dockHasFocus) {
             runCatching { contentFocus.requestFocus() }
         }
     }
@@ -160,10 +201,10 @@ fun LumenApp(settings: AppSettings) {
     LaunchedEffect(section) {
         if (section != Section.Home) homeAtTop = true
     }
-    val dockVisible = playing == null && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
+    val dockVisible = !fullscreen && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
 
     // Back from content brings the dock back and moves focus to it; Back on the dock leaves the app.
-    BackHandler(enabled = !dockHasFocus && !showAddSource && detailsItem == null && playing == null) {
+    BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && !fullscreen && guideChannels == null) {
         dockForced = true
     }
     LaunchedEffect(dockForced) {
@@ -177,52 +218,98 @@ fun LumenApp(settings: AppSettings) {
     }
 
     // ----- actions
-    fun reconnect(source: Source) {
+    fun playChannel(channel: LiveChannel) {
+        val current = client ?: return
+        controller.play(channel, settings.preferTs, current.supportsStreamFormats) { ch, ext ->
+            current.streamUrl(ch, ext)
+        }
+        focusedChannelId = channel.id
+    }
+
+    fun testSource(source: Source) {
         scope.launch {
-            reconnectingId = source.id
-            val result = XtreamClient(source).checkConnection()
+            testingId = source.id
+            val result = clientFor(source).checkConnection()
             val problem = (result as? ConnectionResult.Failed)?.message
             store.update(source.copy(lastCheckedAt = System.currentTimeMillis(), lastError = problem))
             sources = store.load()
             AppLog.add(
-                if (problem == null) "Connected to ${source.name}" else "Connection to ${source.name} failed: $problem",
+                if (problem == null) "Connection to ${source.name} works" else "Connection to ${source.name} failed: $problem",
             )
-            reconnectingId = null
-            if (problem == null && source.id == activeSource?.id) retryKey++
+            testingId = null
+            if (problem == null && source.id == activeSource?.id) {
+                epgVersion++
+                retryKey++
+            }
         }
     }
 
-    /** Checks the login, saves it, and returns a message for the user, or null on success. */
-    suspend fun submitSource(server: String, user: String, pass: String): String? {
-        validateServerUrl(server)?.let { return it }
-        val url = normalizeServerUrl(server)
+    /** Tests, and when [save] is true also saves, a connection. Returns a message for the user, or null on success. */
+    suspend fun submitConnection(type: SourceType, values: Map<String, String>, save: Boolean): String? {
         val existing = editingSource
-        val candidate = Source(
-            id = existing?.id ?: UUID.randomUUID().toString(),
-            name = hostName(url),
-            baseUrl = url,
-            username = user.trim(),
-            password = pass,
-        )
-        return when (val result = XtreamClient(candidate).checkConnection()) {
-            is ConnectionResult.Failed -> {
-                AppLog.add("Connection to ${candidate.name} failed: ${result.message}")
-                result.message
+        val id = existing?.id ?: UUID.randomUUID().toString()
+        val name = values["name"].orEmpty().trim()
+        val user = values["user"].orEmpty().trim()
+        val pass = values["pass"].orEmpty()
+
+        val candidate: Source = when (type) {
+            SourceType.XTREAM -> {
+                validateServerUrl(values["url"].orEmpty())?.let { return it }
+                if (user.isEmpty() || pass.isEmpty()) return "Enter the username and password."
+                val url = normalizeServerUrl(values["url"].orEmpty())
+                Source(id, name.ifEmpty { hostName(url) }, url, user, pass, type = type)
             }
 
-            ConnectionResult.Connected -> {
-                val saved = candidate.copy(lastCheckedAt = System.currentTimeMillis())
-                if (existing != null) store.update(saved) else store.add(saved)
-                sources = store.load()
-                if (settings.activeSourceId == null || sources.size == 1) settings.updateActiveSource(saved.id)
-                if (existing != null && existing.id == activeSource?.id) retryKey++
-                AppLog.add("Connected to ${saved.name}")
-                null
+            SourceType.SELF_HOSTED -> {
+                val address = values["url"].orEmpty().trim()
+                if (address.isEmpty()) return "Enter the server address."
+                val url = buildSelfHostedUrl(address, values["port"].orEmpty().trim(), values["https"] == "1")
+                    ?: return "That server address or port isn't valid."
+                if (user.isEmpty() || pass.isEmpty()) return "Enter the username and password."
+                Source(id, name.ifEmpty { hostName(url) }, url, user, pass, type = type)
+            }
+
+            SourceType.M3U -> {
+                val file = values["file"].orEmpty()
+                val link = values["url"].orEmpty().trim()
+                when {
+                    file.isNotEmpty() -> Source(
+                        id, name.ifEmpty { "Playlist" }, M3uClient.FILE_PREFIX + file, "", "", type = type,
+                    )
+
+                    link.isNotEmpty() -> {
+                        validatePlaylistLink(link)?.let { return it }
+                        Source(id, name.ifEmpty { hostName(link) }, link, "", "", type = type)
+                    }
+
+                    else -> return "Enter a playlist link or import a file."
+                }
             }
         }
+
+        val result = clientFor(candidate).checkConnection()
+        if (result is ConnectionResult.Failed) {
+            AppLog.add("Connection to ${candidate.name} failed: ${result.message}")
+            return result.message
+        }
+        if (!save) return null
+
+        val saved = candidate.copy(lastCheckedAt = System.currentTimeMillis())
+        if (existing != null) store.update(saved) else store.add(saved)
+        sources = store.load()
+        if (settings.activeSourceId == null || sources.size == 1) settings.updateActiveSource(saved.id)
+        if (existing != null && existing.id == activeSource?.id) {
+            epgVersion++
+            retryKey++
+        }
+        AppLog.add("Saved connection ${saved.name}")
+        return null
     }
 
     // ----- layout
+    val showVideo = controller.channel != null &&
+        (fullscreen || (section == Section.LiveTv && previewBounds != null && formType == null && detailsItem == null))
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -230,19 +317,25 @@ fun LumenApp(settings: AppSettings) {
             // Ignore the remote while the boot screen is showing.
             .onPreviewKeyEvent { !booted },
     ) {
+        // The soft charcoal backdrop. The fullscreen video draws over it, so video is never tinted.
+        AppBackground()
+
         when {
-            showAddSource -> AddSourceScreen(
-                initial = editingSource,
-                onClose = {
-                    showAddSource = false
-                    editingSource = null
-                },
-                onSubmit = { server, user, pass -> submitSource(server, user, pass) },
-            )
+            formType != null -> formType?.let { type ->
+                ConnectionFormScreen(
+                    type = type,
+                    initial = editingSource,
+                    onClose = {
+                        formType = null
+                        editingSource = null
+                    },
+                    onSubmit = { values, save -> submitConnection(type, values, save) },
+                )
+            }
 
             detailsItem != null -> DetailsScreen(
                 item = detailsItem!!,
-                loadDetails = { item -> activeSource?.let { XtreamClient(it).loadDetails(item) } },
+                loadDetails = { item -> client?.loadDetails(item) },
                 onBack = { detailsItem = null },
             )
 
@@ -264,7 +357,38 @@ fun LumenApp(settings: AppSettings) {
                             onAtTopChange = { homeAtTop = it },
                             onAddSource = {
                                 editingSource = null
-                                showAddSource = true
+                                formType = SourceType.XTREAM
+                            },
+                            onRetry = { retryKey++ },
+                        )
+
+                        Section.LiveTv -> LiveTvScreen(
+                            state = liveState,
+                            sourceId = activeSource?.id ?: "",
+                            favorites = settings.favoriteChannels,
+                            focusedChannelId = focusedChannelId,
+                            playingChannelId = controller.channel?.id,
+                            videoHeight = controller.videoHeight,
+                            showQuality = settings.showQuality,
+                            epg = epg,
+                            onFocusChannel = { focusedChannelId = it.id },
+                            onToggleFavorite = { channel ->
+                                activeSource?.let { settings.toggleFavoriteChannel(favoriteKey(it.id, channel)) }
+                            },
+                            onSelect = { playChannel(it) },
+                            onFullscreen = { channels, index ->
+                                val channel = channels[index]
+                                if (controller.channel?.id != channel.id) playChannel(channel)
+                                fullscreenChannels = channels
+                                fullscreen = true
+                            },
+                            onOpenGuide = { guideChannels = it },
+                            onPreviewBounds = { previewBounds = it },
+                            dockFocus = dockFocus,
+                            contentFocus = contentFocus,
+                            onAddSource = {
+                                editingSource = null
+                                formType = SourceType.XTREAM
                             },
                             onRetry = { retryKey++ },
                         )
@@ -273,60 +397,50 @@ fun LumenApp(settings: AppSettings) {
                             sources = sources,
                             info = SettingsInfo(
                                 activeSourceId = activeSource?.id,
-                                reconnectingId = reconnectingId,
+                                testingId = testingId,
                                 lastRefreshAt = lastRefreshAt,
                                 imageCacheBytes = imageCacheBytes,
                             ),
                             settings = settings,
                             actions = SettingsActions(
-                                onAddSource = {
+                                onAddSource = { type ->
                                     editingSource = null
-                                    showAddSource = true
+                                    formType = type
                                 },
                                 onEditSource = {
                                     editingSource = it
-                                    showAddSource = true
+                                    formType = it.type
                                 },
                                 onRemoveSource = { removed ->
+                                    if (removed.baseUrl.startsWith(M3uClient.FILE_PREFIX)) {
+                                        runCatching { File(removed.baseUrl.removePrefix(M3uClient.FILE_PREFIX)).delete() }
+                                    }
                                     store.remove(removed.id)
                                     sources = store.load()
                                     if (settings.activeSourceId == removed.id) {
                                         settings.updateActiveSource(sources.firstOrNull()?.id)
                                     }
-                                    AppLog.add("Removed ${removed.name}")
+                                    AppLog.add("Deleted ${removed.name}")
                                 },
                                 onSetActive = { settings.updateActiveSource(it.id) },
-                                onReconnect = { reconnect(it) },
-                                onRefreshLibrary = { retryKey++ },
+                                onTestSource = { testSource(it) },
+                                onRefreshData = {
+                                    epgVersion++
+                                    retryKey++
+                                },
                                 onClearImageCache = {
                                     context.imageLoader.memoryCache?.clear()
                                     context.imageLoader.diskCache?.clear()
                                     cacheVersion++
                                     AppLog.add("Image cache cleared")
                                 },
+                                onClearGuideCache = {
+                                    epgVersion++
+                                    AppLog.add("Guide data will be loaded again")
+                                },
                             ),
                             dockFocus = dockFocus,
                             contentFocus = contentFocus,
-                        )
-
-                        Section.LiveTv -> LiveTvScreen(
-                            state = liveState,
-                            sourceId = activeSource?.id ?: "",
-                            favorites = settings.favoriteChannels,
-                            focusedChannelId = focusedChannelId,
-                            onFocusChannel = { focusedChannelId = it.id },
-                            onToggleFavorite = { channel ->
-                                activeSource?.let { settings.toggleFavoriteChannel(favoriteKey(it.id, channel)) }
-                            },
-                            onPlay = { channels, index -> playing = PlayRequest(channels, index) },
-                            loadNowNext = { channel -> client?.shortEpg(channel.id) },
-                            dockFocus = dockFocus,
-                            contentFocus = contentFocus,
-                            onAddSource = {
-                                editingSource = null
-                                showAddSource = true
-                            },
-                            onRetry = { retryKey++ },
                         )
 
                         else -> PlaceholderScreen(current)
@@ -352,15 +466,43 @@ fun LumenApp(settings: AppSettings) {
             }
         }
 
-        val request = playing
-        if (request != null && client != null) {
-            PlayerScreen(
-                channels = request.channels,
-                startIndex = request.index,
-                streamUrl = { channel, extension -> client.liveUrl(channel.id, extension) },
-                loadNowNext = { channel -> client.shortEpg(channel.id) },
-                onChannelChanged = { focusedChannelId = it.id },
-                onClose = { playing = null },
+        // The one video surface: a small preview in Live TV, or the whole screen.
+        if (showVideo) {
+            VideoLayer(
+                controller = controller,
+                fullscreen = fullscreen,
+                previewBounds = previewBounds,
+            )
+        }
+
+        if (fullscreen && controller.channel != null) {
+            FullscreenControls(
+                controller = controller,
+                channels = fullscreenChannels,
+                epg = epg,
+                showQuality = settings.showQuality,
+                overlaySeconds = settings.overlaySeconds,
+                guideOpen = guideChannels != null,
+                onZap = { playChannel(it) },
+                onOpenGuide = { guideChannels = fullscreenChannels },
+                onClose = { fullscreen = false },
+            )
+        }
+
+        // The guide sits over the video without touching it, so the stream keeps playing.
+        val guide = guideChannels
+        if (guide != null) {
+            GuidePanel(
+                channels = guide,
+                currentId = controller.channel?.id ?: focusedChannelId,
+                epg = epg,
+                favorites = settings.favoriteChannels,
+                favoriteKeyOf = { channel -> favoriteKey(activeSource?.id ?: "", channel) },
+                onPick = { channel ->
+                    playChannel(channel)
+                    guideChannels = null
+                },
+                onClose = { guideChannels = null },
             )
         }
 
@@ -372,6 +514,3 @@ fun LumenApp(settings: AppSettings) {
         }
     }
 }
-
-/** A channel list and which channel to start on. Up and Down in the player move through [channels]. */
-private data class PlayRequest(val channels: List<LiveChannel>, val index: Int)

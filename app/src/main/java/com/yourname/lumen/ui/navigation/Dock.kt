@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourname.lumen.core.designsystem.GearIcon
+import com.yourname.lumen.core.designsystem.GlassLevel
+import com.yourname.lumen.core.designsystem.glass
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.SearchIcon
@@ -46,10 +48,6 @@ import kotlin.math.roundToInt
 data class DockSlot(val x: Int, val w: Int, val h: Int)
 
 private val DockShape = RoundedCornerShape(50)
-private val DockFill = Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x1AFFFFFF)))
-private val DockEdge = Brush.verticalGradient(listOf(Color(0x80FFFFFF), Color(0x1FFFFFFF)))
-private val IndicatorFill = Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x2EFFFFFF)))
-private val IndicatorEdge = Brush.verticalGradient(listOf(Color(0x80FFFFFF), Color(0x1AFFFFFF)))
 
 /**
  * Floating glass dock. The selected section is shown by a soft glass pill that slides between
@@ -71,8 +69,7 @@ fun LumenDock(
             .onFocusChanged { onDockFocusChange(it.hasFocus) }
             .focusGroup()
             .clip(DockShape)
-            .background(DockFill)
-            .border(1.dp, DockEdge, DockShape)
+            .glass(DockShape, GlassLevel.Nav)
             .padding(4.dp),
     ) {
         slots[selected]?.let { SelectionIndicator(it) }
@@ -118,8 +115,7 @@ private fun SelectionIndicator(slot: DockSlot) {
         modifier = Modifier
             .offset { IntOffset(x.roundToInt(), 0) }
             .size(width = with(density) { w.toDp() }, height = with(density) { slot.h.toDp() })
-            .background(IndicatorFill, DockShape)
-            .border(1.dp, IndicatorEdge, DockShape),
+            .glass(DockShape, GlassLevel.Selected),
     )
 }
 

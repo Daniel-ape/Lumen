@@ -1,7 +1,7 @@
 package com.yourname.lumen.data.live
 
 import com.yourname.lumen.core.diagnostics.AppLog
-import com.yourname.lumen.data.xtream.XtreamClient
+import com.yourname.lumen.data.source.clientFor
 import com.yourname.lumen.data.xtream.describeFailure
 import com.yourname.lumen.domain.model.LiveState
 import com.yourname.lumen.domain.model.Source
@@ -11,7 +11,7 @@ import kotlin.coroutines.cancellation.CancellationException
 suspend fun loadLiveState(source: Source?): LiveState {
     if (source == null) return LiveState.NoSource
     return try {
-        val content = XtreamClient(source).loadLive()
+        val content = clientFor(source).loadLive()
         AppLog.add("Loaded ${content.channels.size} channels from ${source.name}")
         LiveState.Ready(content)
     } catch (e: CancellationException) {
