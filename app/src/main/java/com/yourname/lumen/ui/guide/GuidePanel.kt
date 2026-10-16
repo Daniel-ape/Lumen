@@ -128,6 +128,7 @@ fun GuidePanel(
                     ChannelListRow(
                         channel = channel,
                         epg = epg,
+                        showLogo = true,
                         favorite = favoriteKeyOf(channel) in favorites,
                         playing = channel.id == currentId,
                         onFocus = { focusedId = channel.id },
