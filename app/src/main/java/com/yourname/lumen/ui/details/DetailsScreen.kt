@@ -1,10 +1,13 @@
 package com.yourname.lumen.ui.details
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +31,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +41,9 @@ import com.yourname.lumen.core.designsystem.LumenButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.glass
+import com.yourname.lumen.core.designsystem.motionMs
+import com.yourname.lumen.core.util.backdropRequest
+import com.yourname.lumen.core.util.posterRequest
 import com.yourname.lumen.domain.model.MediaDetails
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
@@ -57,6 +64,7 @@ fun DetailsScreen(
 ) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
+    val context = LocalContext.current
 
     val known = remember(item) {
         MediaDetails(
@@ -77,6 +85,7 @@ fun DetailsScreen(
     var loaded by remember(item) { mutableStateOf<MediaDetails?>(null) }
     var loading by remember(item) { mutableStateOf(true) }
     val backFocus = remember { FocusRequester() }
+    var expanded by remember(item) { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -98,7 +107,7 @@ fun DetailsScreen(
     Box(modifier = modifier.fillMaxSize().background(colors.background)) {
         if (backdrop != null) {
             AsyncImage(
-                model = backdrop,
+                model = backdropRequest(context, backdrop),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter,
@@ -159,12 +168,15 @@ fun DetailsScreen(
             }
 
             if (!d.plot.isNullOrBlank()) {
-                LumenText(
-                    text = d.plot,
-                    style = type.body.copy(fontSize = 14.sp, lineHeight = 20.sp, shadow = TextShadow),
-                    color = Color.White.copy(alpha = 0.92f),
-                    maxLines = 6,
-                )
+                // A short preview by default; "Show more" opens the whole text and the box grows smoothly.
+                Column(modifier = Modifier.animateContentSize(tween(motionMs(220)))) {
+                    LumenText(
+                        text = d.plot,
+                        style = type.body.copy(fontSize = 14.sp, lineHeight = 20.sp, shadow = TextShadow),
+                        color = Color.White.copy(alpha = 0.92f),
+                        maxLines = if (expanded) 40 else 3,
+                    )
+                }
             } else if (loading) {
                 LumenText("Loading details…", type.label, color = colors.textSecondary)
             }
@@ -187,12 +199,21 @@ fun DetailsScreen(
             }
 
             Spacer(Modifier.height(6.dp))
-            LumenButton(
-                text = "Back",
-                modifier = Modifier.focusRequester(backFocus),
-                primary = true,
-                onClick = onBack,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LumenButton(
+                    text = "Back",
+                    modifier = Modifier.focusRequester(backFocus),
+                    primary = true,
+                    onClick = onBack,
+                )
+                // Only offered when the text is long enough to need it.
+                if ((d.plot?.length ?: 0) > 170) {
+                    LumenButton(
+                        text = if (expanded) "Show less" else "Show more",
+                        onClick = { expanded = !expanded },
+                    )
+                }
+            }
         }
 
         // Poster on the right when the page is using a different image as its backdrop.
@@ -209,7 +230,7 @@ fun DetailsScreen(
                     .glass(shape),
             ) {
                 AsyncImage(
-                    model = poster,
+                    model = posterRequest(context, poster),
                     contentDescription = d.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

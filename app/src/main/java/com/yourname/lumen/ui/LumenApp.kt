@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -33,7 +35,10 @@ import androidx.compose.ui.unit.dp
 import coil.imageLoader
 import com.yourname.lumen.core.designsystem.AppBackground
 import com.yourname.lumen.core.designsystem.LumenTheme
+import com.yourname.lumen.core.designsystem.motionMs
 import com.yourname.lumen.core.diagnostics.AppLog
+import com.yourname.lumen.core.util.backdropRequest
+import com.yourname.lumen.data.cache.LibraryCache
 import com.yourname.lumen.data.epg.EpgCache
 import com.yourname.lumen.data.home.loadHomeState
 import com.yourname.lumen.data.live.loadLiveState
@@ -57,7 +62,6 @@ import com.yourname.lumen.domain.model.favoriteKey
 import com.yourname.lumen.ui.boot.BootScreen
 import com.yourname.lumen.ui.common.PlaceholderScreen
 import com.yourname.lumen.ui.details.DetailsScreen
-import com.yourname.lumen.ui.guide.GuidePanel
 import com.yourname.lumen.ui.home.HomeScreen
 import com.yourname.lumen.ui.live.LiveTvScreen
 import com.yourname.lumen.ui.navigation.DockSlot
@@ -72,14 +76,22 @@ import com.yourname.lumen.ui.settings.SettingsInfo
 import com.yourname.lumen.ui.settings.SettingsScreen
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LumenApp(settings: AppSettings) {
     val context = LocalContext.current
     val store = remember { SourceStore(context.applicationContext) }
+    val libraryCache = remember { LibraryCache(File(context.filesDir, "library")) }
     val scope = rememberCoroutineScope()
+
+    // Animation lengths (all zero when the user chose Reduced Motion).
+    val msSection = motionMs(220)
+    val msDock = motionMs(260)
+    val msBoot = motionMs(400)
 
     // ----- connections
     var sources by remember { mutableStateOf(store.load()) }
@@ -91,12 +103,21 @@ fun LumenApp(settings: AppSettings) {
 
     // ----- content
     var homeState by remember { mutableStateOf<HomeState>(HomeState.Loading) }
+    var homeFor by remember { mutableStateOf<String?>(null) }
     var liveState by remember { mutableStateOf<LiveState>(LiveState.Loading) }
     var liveKey by remember { mutableStateOf<Pair<Source?, Int>?>(null) }
     var retryKey by remember { mutableIntStateOf(0) }
     var lastRefreshAt by remember { mutableLongStateOf(0L) }
     var imageCacheBytes by remember { mutableLongStateOf(0L) }
+    var libraryCacheBytes by remember { mutableLongStateOf(0L) }
     var cacheVersion by remember { mutableIntStateOf(0) }
+
+    // Home's position is kept here, so leaving Home (details, other sections) and coming back
+    // returns to the same scroll position, hero slide and row positions.
+    val homeListState = rememberLazyListState()
+    val rowStates = remember { List(2) { LazyListState() } }
+    var heroIndex by remember { mutableIntStateOf(0) }
+    var restoreItemId by remember { mutableStateOf<String?>(null) }
 
     // Programme information shared by the list, the preview, the fullscreen bar and the guide.
     var epgVersion by remember { mutableIntStateOf(0) }
@@ -109,12 +130,13 @@ fun LumenApp(settings: AppSettings) {
     DisposableEffect(controller) { onDispose { controller.release() } }
     var fullscreen by remember { mutableStateOf(false) }
     var fullscreenChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
-    var guideChannels by remember { mutableStateOf<List<LiveChannel>?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
-    var focusedChannelId by remember { mutableStateOf<String?>(null) }
+    var focusedChannelId by remember {
+        mutableStateOf(if (settings.rememberLastChannel) settings.lastChannelId else null)
+    }
 
     // ----- screens
-    var section by remember { mutableStateOf(Section.Home) }
+    var section by remember { mutableStateOf(if (settings.startSection == 1) Section.LiveTv else Section.Home) }
     var formType by remember { mutableStateOf<SourceType?>(null) }
     var editingSource by remember { mutableStateOf<Source?>(null) }
     var detailsItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -140,18 +162,30 @@ fun LumenApp(settings: AppSettings) {
         if (minElapsed && homeState !is HomeState.Loading) booted = true
     }
 
-    // Reload Home when the active connection changes (not when only its status text changes) or on refresh.
+    // Home: shows the saved copy at once if there is one, then fresh content as it arrives.
+    // The screen is only blanked when the source itself changed.
     LaunchedEffect(loadKey, retryKey) {
-        homeState = HomeState.Loading
-        homeState = loadHomeState(activeSource)
-        if (homeState is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
+        if (homeState !is HomeState.Ready || homeFor != activeSource?.id) homeState = HomeState.Loading
+        val result = loadHomeState(activeSource, libraryCache) { homeState = it }
+        homeState = result
+        homeFor = activeSource?.id
+        if (result is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
     }
 
-    // The channel list loads the first time Live TV is opened, and again after a refresh or a switch.
+    // Start loading the hero pictures the moment their addresses are known, before they are on screen.
+    LaunchedEffect(homeState) {
+        val ready = homeState as? HomeState.Ready ?: return@LaunchedEffect
+        ready.content.hero.take(3).forEach { item ->
+            (item.backdropUrl ?: item.posterUrl)?.let { context.imageLoader.enqueue(backdropRequest(context, it)) }
+        }
+    }
+
+    // The channel list: first open uses the saved copy if it is fresh enough; a refresh asks again.
     LaunchedEffect(section, loadKey, retryKey) {
         if (section == Section.LiveTv && liveKey != (loadKey to retryKey)) {
-            liveState = LiveState.Loading
-            liveState = loadLiveState(activeSource)
+            val force = liveKey != null && liveKey?.second != retryKey
+            if (liveState !is LiveState.Ready || liveKey?.first?.id != activeSource?.id) liveState = LiveState.Loading
+            liveState = loadLiveState(activeSource, libraryCache, force) { liveState = it }
             liveKey = loadKey to retryKey
         }
     }
@@ -168,10 +202,11 @@ fun LumenApp(settings: AppSettings) {
         }
     }
 
-    // Image cache size for Settings.
+    // Storage figures for Settings.
     LaunchedEffect(section, cacheVersion) {
         if (section == Section.Settings) {
             imageCacheBytes = context.imageLoader.diskCache?.size ?: 0L
+            libraryCacheBytes = withContext(Dispatchers.IO) { libraryCache.sizeBytes() }
         }
     }
 
@@ -180,7 +215,6 @@ fun LumenApp(settings: AppSettings) {
         // A different connection means different channels: stop whatever was playing.
         controller.stop()
         fullscreen = false
-        guideChannels = null
     }
     LaunchedEffect(section, fullscreen) {
         if (section != Section.LiveTv && !fullscreen) controller.stop()
@@ -190,9 +224,10 @@ fun LumenApp(settings: AppSettings) {
     }
 
     // Put focus on the page once it has something to focus, without stealing it from the dock or the player.
-    LaunchedEffect(formType, detailsItem, homeState, liveState, section, fullscreen, guideChannels) {
+    // (A pending "return to this poster" is left alone: Home puts focus there itself.)
+    LaunchedEffect(formType, detailsItem, homeState, liveState, section, fullscreen) {
         val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
-        if (formType == null && detailsItem == null && !fullscreen && guideChannels == null && ready && !dockHasFocus) {
+        if (formType == null && detailsItem == null && !fullscreen && ready && !dockHasFocus && restoreItemId == null) {
             runCatching { contentFocus.requestFocus() }
         }
     }
@@ -204,7 +239,7 @@ fun LumenApp(settings: AppSettings) {
     val dockVisible = !fullscreen && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
 
     // Back from content brings the dock back and moves focus to it; Back on the dock leaves the app.
-    BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && !fullscreen && guideChannels == null) {
+    BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && !fullscreen) {
         dockForced = true
     }
     LaunchedEffect(dockForced) {
@@ -224,6 +259,7 @@ fun LumenApp(settings: AppSettings) {
             current.streamUrl(ch, ext)
         }
         focusedChannelId = channel.id
+        if (settings.rememberLastChannel) settings.updateLastChannel(channel.id)
     }
 
     fun testSource(source: Source) {
@@ -309,6 +345,11 @@ fun LumenApp(settings: AppSettings) {
     // ----- layout
     val showVideo = controller.channel != null &&
         (fullscreen || (section == Section.LiveTv && previewBounds != null && formType == null && detailsItem == null))
+    val guideDpPerMinute = when (settings.guideDensity) {
+        0 -> 3.2f
+        2 -> 5.6f
+        else -> 4.2f
+    }
 
     Box(
         modifier = Modifier
@@ -342,7 +383,7 @@ fun LumenApp(settings: AppSettings) {
             else -> {
                 Crossfade(
                     targetState = section,
-                    animationSpec = tween(220),
+                    animationSpec = tween(msSection),
                     label = "section",
                 ) { current ->
                     when (current) {
@@ -353,13 +394,26 @@ fun LumenApp(settings: AppSettings) {
                             dockHasFocus = dockHasFocus,
                             showRatings = settings.showRatings,
                             autoRotate = settings.heroAutoRotate,
-                            onOpenDetails = { detailsItem = it },
+                            onOpenDetails = {
+                                restoreItemId = null
+                                detailsItem = it
+                            },
+                            onRowOpen = {
+                                restoreItemId = it.id
+                                detailsItem = it
+                            },
                             onAtTopChange = { homeAtTop = it },
                             onAddSource = {
                                 editingSource = null
                                 formType = SourceType.XTREAM
                             },
                             onRetry = { retryKey++ },
+                            listState = homeListState,
+                            rowStates = rowStates,
+                            heroIndex = heroIndex,
+                            onHeroIndex = { heroIndex = it },
+                            restoreItemId = restoreItemId,
+                            onRestored = { restoreItemId = null },
                         )
 
                         Section.LiveTv -> LiveTvScreen(
@@ -370,6 +424,9 @@ fun LumenApp(settings: AppSettings) {
                             playingChannelId = controller.channel?.id,
                             videoHeight = controller.videoHeight,
                             showQuality = settings.showQuality,
+                            showLogos = settings.showLogos,
+                            guideDpPerMinute = guideDpPerMinute,
+                            initialGroup = settings.liveStartGroup,
                             epg = epg,
                             onFocusChannel = { focusedChannelId = it.id },
                             onToggleFavorite = { channel ->
@@ -382,7 +439,6 @@ fun LumenApp(settings: AppSettings) {
                                 fullscreenChannels = channels
                                 fullscreen = true
                             },
-                            onOpenGuide = { guideChannels = it },
                             onPreviewBounds = { previewBounds = it },
                             dockFocus = dockFocus,
                             contentFocus = contentFocus,
@@ -400,6 +456,7 @@ fun LumenApp(settings: AppSettings) {
                                 testingId = testingId,
                                 lastRefreshAt = lastRefreshAt,
                                 imageCacheBytes = imageCacheBytes,
+                                libraryCacheBytes = libraryCacheBytes,
                             ),
                             settings = settings,
                             actions = SettingsActions(
@@ -438,6 +495,12 @@ fun LumenApp(settings: AppSettings) {
                                     epgVersion++
                                     AppLog.add("Guide data will be loaded again")
                                 },
+                                onClearLibraryCache = {
+                                    libraryCache.clear()
+                                    cacheVersion++
+                                    AppLog.add("Saved library data cleared")
+                                },
+                                onRestart = { restartApp(context) },
                             ),
                             dockFocus = dockFocus,
                             contentFocus = contentFocus,
@@ -450,8 +513,8 @@ fun LumenApp(settings: AppSettings) {
                 AnimatedVisibility(
                     visible = dockVisible,
                     modifier = Modifier.align(Alignment.TopCenter),
-                    enter = fadeIn(tween(200)) + slideInVertically(tween(260)) { -it },
-                    exit = fadeOut(tween(200)) + slideOutVertically(tween(260)) { -it },
+                    enter = fadeIn(tween(msDock)) + slideInVertically(tween(msDock)) { -it },
+                    exit = fadeOut(tween(msDock)) + slideOutVertically(tween(msDock)) { -it },
                 ) {
                     LumenDock(
                         selected = section,
@@ -472,43 +535,28 @@ fun LumenApp(settings: AppSettings) {
                 controller = controller,
                 fullscreen = fullscreen,
                 previewBounds = previewBounds,
+                scaleMode = settings.videoScale,
             )
         }
 
+        // Fullscreen controls: the info bar and the programme guide are two states of one top panel.
         if (fullscreen && controller.channel != null) {
             FullscreenControls(
                 controller = controller,
                 channels = fullscreenChannels,
                 epg = epg,
                 showQuality = settings.showQuality,
+                showLogos = settings.showLogos,
                 overlaySeconds = settings.overlaySeconds,
-                guideOpen = guideChannels != null,
+                guideDpPerMinute = guideDpPerMinute,
                 onZap = { playChannel(it) },
-                onOpenGuide = { guideChannels = fullscreenChannels },
                 onClose = { fullscreen = false },
-            )
-        }
-
-        // The guide sits over the video without touching it, so the stream keeps playing.
-        val guide = guideChannels
-        if (guide != null) {
-            GuidePanel(
-                channels = guide,
-                currentId = controller.channel?.id ?: focusedChannelId,
-                epg = epg,
-                favorites = settings.favoriteChannels,
-                favoriteKeyOf = { channel -> favoriteKey(activeSource?.id ?: "", channel) },
-                onPick = { channel ->
-                    playChannel(channel)
-                    guideChannels = null
-                },
-                onClose = { guideChannels = null },
             )
         }
 
         AnimatedVisibility(
             visible = !booted,
-            exit = fadeOut(animationSpec = tween(400)),
+            exit = fadeOut(animationSpec = tween(msBoot)),
         ) {
             BootScreen()
         }

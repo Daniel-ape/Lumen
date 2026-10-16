@@ -4,10 +4,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val clock = SimpleDateFormat("HH:mm", Locale.getDefault())
+/** Whether times are shown as 20:30 (true) or 8:30 PM (false). Set from Settings. */
+object ClockFormat {
+    @Volatile
+    var use24h: Boolean = true
+}
 
-/** "20:30" from seconds since 1970, in the device's time zone. */
-fun clockTime(sec: Long): String = clock.format(Date(sec * 1000))
+private val clock24 = SimpleDateFormat("HH:mm", Locale.getDefault())
+private val clock12 = SimpleDateFormat("h:mm a", Locale.getDefault())
+
+/** "20:30" (or "8:30 PM") from seconds since 1970, in the device's time zone. */
+fun clockTime(sec: Long): String =
+    (if (ClockFormat.use24h) clock24 else clock12).format(Date(sec * 1000))
 
 /** "20:00 – 21:00", "20:00", or null when the source gave no times. */
 fun timeRangeText(startSec: Long?, endSec: Long?): String? = when {
@@ -32,4 +40,12 @@ fun qualityLabel(heightPx: Int): String? = when {
     heightPx >= 700 -> "720p"
     heightPx >= 540 -> "576p"
     else -> "${heightPx}p"
+}
+
+/** "HD", "Full HD" or "4K" from the decoded video height. Null below 720 or when unknown. */
+fun qualityClass(heightPx: Int): String? = when {
+    heightPx >= 2000 -> "4K"
+    heightPx >= 1000 -> "Full HD"
+    heightPx >= 700 -> "HD"
+    else -> null
 }

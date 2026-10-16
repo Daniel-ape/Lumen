@@ -6,9 +6,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -37,6 +40,10 @@ class PlaybackController(context: Context) {
     var videoHeight by mutableIntStateOf(0)
         private set
 
+    /** Audio format of the playing track, e.g. "Dolby Digital · 5.1". Null when the player can't tell. */
+    var audioLabel by mutableStateOf<String?>(null)
+        private set
+
     private var urlFor: ((LiveChannel, String) -> String)? = null
     private var firstExtension = "m3u8"
     private var extension = "m3u8"
@@ -56,6 +63,10 @@ class PlaybackController(context: Context) {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     buffering = playbackState == Player.STATE_BUFFERING
                     if (playbackState == Player.STATE_READY) failed = false
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    audioLabel = describeAudio(tracks)
                 }
 
                 override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -93,6 +104,7 @@ class PlaybackController(context: Context) {
         extension = firstExtension
         failed = false
         videoHeight = 0
+        audioLabel = null
         start()
     }
 
@@ -109,6 +121,7 @@ class PlaybackController(context: Context) {
         buffering = false
         failed = false
         videoHeight = 0
+        audioLabel = null
     }
 
     fun setMuted(muted: Boolean) {
@@ -130,4 +143,35 @@ class PlaybackController(context: Context) {
         exo.prepare()
         exo.playWhenReady = true
     }
+}
+
+/** Describes the selected audio track from what the stream really declares; null if nothing is known. */
+@OptIn(UnstableApi::class)
+private fun describeAudio(tracks: Tracks): String? {
+    for (group in tracks.groups) {
+        if (group.type != C.TRACK_TYPE_AUDIO || !group.isSelected) continue
+        for (i in 0 until group.length) {
+            if (!group.isTrackSelected(i)) continue
+            val format = group.getTrackFormat(i)
+            val codec = when (format.sampleMimeType) {
+                MimeTypes.AUDIO_AC3 -> "Dolby Digital"
+                MimeTypes.AUDIO_E_AC3 -> "Dolby Digital+"
+                MimeTypes.AUDIO_AAC -> "AAC"
+                MimeTypes.AUDIO_MPEG -> "MP3"
+                MimeTypes.AUDIO_MPEG_L2 -> "MP2"
+                MimeTypes.AUDIO_DTS -> "DTS"
+                else -> null
+            }
+            val channels = when (format.channelCount) {
+                1 -> "Mono"
+                2 -> "Stereo"
+                6 -> "5.1"
+                8 -> "7.1"
+                Format.NO_VALUE, 0 -> null
+                else -> "${format.channelCount} channels"
+            }
+            return listOfNotNull(codec, channels).joinToString(" · ").ifEmpty { null }
+        }
+    }
+    return null
 }

@@ -19,7 +19,8 @@ import com.yourname.lumen.domain.model.SourceType
  */
 interface SourceClient {
     suspend fun checkConnection(): ConnectionResult
-    suspend fun loadHome(): HomeContent
+    /** Loads Home. [onPartial] is called with what is ready as soon as part of it is, so it can show early. */
+    suspend fun loadHome(onPartial: (HomeContent) -> Unit = {}): HomeContent
     suspend fun loadLive(): LiveContent
     suspend fun loadDetails(item: MediaItem): MediaDetails?
 

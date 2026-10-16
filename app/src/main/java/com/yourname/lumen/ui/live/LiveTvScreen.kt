@@ -3,6 +3,8 @@ package com.yourname.lumen.ui.live
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -44,8 +47,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,9 +60,11 @@ import com.yourname.lumen.core.designsystem.LumenProgressBar
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.glass
+import com.yourname.lumen.core.designsystem.motionMs
 import com.yourname.lumen.core.designsystem.onDirection
 import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.core.util.progressOf
+import com.yourname.lumen.core.util.qualityClass
 import com.yourname.lumen.core.util.qualityLabel
 import com.yourname.lumen.core.util.timeRangeText
 import com.yourname.lumen.data.epg.EpgCache
@@ -69,17 +75,16 @@ import com.yourname.lumen.domain.model.NowNext
 import com.yourname.lumen.domain.model.favoriteKey
 import com.yourname.lumen.ui.components.ChannelListRow
 import com.yourname.lumen.ui.components.ChannelLogo
+import com.yourname.lumen.ui.guide.GuideTimeline
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 
 /**
- * Live TV, arranged like TiviMate but in Lumen's own glass style:
- * a preview and what's on at the top, categories on the left, a compact channel list beside them.
+ * Live TV: a preview and what's on at the top, categories on the left in a darker column,
+ * and a compact channel list (or the programme guide) beside them.
  *
- * Three different things happen on three different gestures, so moving around never opens anything:
- *  - moving focus only highlights a channel;
- *  - OK on a channel plays it in the preview;
- *  - OK on the channel that is already playing opens fullscreen.
+ * Moving focus only highlights; OK plays a channel in the preview; OK on the playing channel opens fullscreen.
+ * The category column stays until you press RIGHT from it, and comes back when you press LEFT from the list.
  */
 @Composable
 fun LiveTvScreen(
@@ -90,12 +95,14 @@ fun LiveTvScreen(
     playingChannelId: String?,
     videoHeight: Int,
     showQuality: Boolean,
+    showLogos: Boolean,
+    guideDpPerMinute: Float,
+    initialGroup: Int,
     epg: EpgCache?,
     onFocusChannel: (LiveChannel) -> Unit,
     onToggleFavorite: (LiveChannel) -> Unit,
     onSelect: (LiveChannel) -> Unit,
     onFullscreen: (List<LiveChannel>, Int) -> Unit,
-    onOpenGuide: (List<LiveChannel>) -> Unit,
     onPreviewBounds: (Rect?) -> Unit,
     dockFocus: FocusRequester,
     contentFocus: FocusRequester,
@@ -153,12 +160,14 @@ fun LiveTvScreen(
                 playingChannelId = playingChannelId,
                 videoHeight = videoHeight,
                 showQuality = showQuality,
+                showLogos = showLogos,
+                guideDpPerMinute = guideDpPerMinute,
+                initialGroup = initialGroup,
                 epg = epg,
                 onFocusChannel = onFocusChannel,
                 onToggleFavorite = onToggleFavorite,
                 onSelect = onSelect,
                 onFullscreen = onFullscreen,
-                onOpenGuide = onOpenGuide,
                 onPreviewBounds = onPreviewBounds,
                 dockFocus = dockFocus,
                 contentFocus = contentFocus,
@@ -200,7 +209,16 @@ private fun LiveMessage(
     }
 }
 
+private const val KIND_ALL = 0
+private const val KIND_FAVORITES = 1
+private const val KIND_CATEGORY = 2
+private const val KIND_GUIDE = 3
+
 private data class Group(val title: String, val count: Int, val categoryId: String?, val kind: Int)
+
+// The two surfaces are deliberately different: the sidebar is darker than the list beside it.
+private val SidebarColor = Color(0xD90A0B0D)
+private val SidebarEdge = Color(0x1AFFFFFF)
 
 @Composable
 private fun LiveBrowser(
@@ -211,17 +229,20 @@ private fun LiveBrowser(
     playingChannelId: String?,
     videoHeight: Int,
     showQuality: Boolean,
+    showLogos: Boolean,
+    guideDpPerMinute: Float,
+    initialGroup: Int,
     epg: EpgCache?,
     onFocusChannel: (LiveChannel) -> Unit,
     onToggleFavorite: (LiveChannel) -> Unit,
     onSelect: (LiveChannel) -> Unit,
     onFullscreen: (List<LiveChannel>, Int) -> Unit,
-    onOpenGuide: (List<LiveChannel>) -> Unit,
     onPreviewBounds: (Rect?) -> Unit,
     dockFocus: FocusRequester,
     contentFocus: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    val focusManager = LocalFocusManager.current
     val groupFocus = remember { FocusRequester() }
     val infoFocus = remember { FocusRequester() }
 
@@ -231,40 +252,45 @@ private fun LiveBrowser(
     }
     val groups = remember(content, favoriteChannels.size) {
         buildList {
-            add(Group("All channels", content.channels.size, null, 0))
-            add(Group("Favorites", favoriteChannels.size, null, 1))
+            add(Group("All channels", content.channels.size, null, KIND_ALL))
+            add(Group("Favorites", favoriteChannels.size, null, KIND_FAVORITES))
+            add(Group("TV Guide", content.channels.size, null, KIND_GUIDE))
             content.categories.forEach { category ->
                 val count = byCategory[category.id]?.size ?: 0
-                if (count > 0) add(Group(category.name, count, category.id, 2))
+                if (count > 0) add(Group(category.name, count, category.id, KIND_CATEGORY))
             }
         }
     }
 
-    var groupIndex by remember { mutableIntStateOf(0) }
+    // initialGroup is 0 All, 1 Favorites, 2 TV Guide; the guide sits third in the list above.
+    var groupIndex by remember { mutableIntStateOf(initialGroup.coerceIn(0, 2)) }
     val group = groups[groupIndex.coerceIn(0, groups.lastIndex)]
     val channels = remember(group, content, favoriteChannels) {
         when (group.kind) {
-            0 -> content.channels
-            1 -> favoriteChannels
+            KIND_ALL, KIND_GUIDE -> content.channels
+            KIND_FAVORITES -> favoriteChannels
             else -> byCategory[group.categoryId].orEmpty()
         }
     }
     val focused = channels.firstOrNull { it.id == focusedChannelId } ?: channels.firstOrNull()
     val playing = content.channels.firstOrNull { it.id == playingChannelId }
 
-    // The category column slides away once you've settled in the channel list, and returns when you go back.
-    var listHasFocus by remember { mutableStateOf(false) }
+    // The category column is only ever hidden or shown by an explicit key press, never by a timer.
     var sidebarExpanded by remember { mutableStateOf(true) }
-    LaunchedEffect(listHasFocus) {
-        if (listHasFocus) {
-            delay(1_200)
-            sidebarExpanded = false
-        } else {
-            sidebarExpanded = true
-        }
+    val sidebarMs = motionMs(240)
+    val sidebarWidth by animateDpAsState(if (sidebarExpanded) 188.dp else 0.dp, tween(sidebarMs), label = "sidebarWidth")
+    val sidebarAlpha by animateFloatAsState(if (sidebarExpanded) 1f else 0f, tween(sidebarMs), label = "sidebarAlpha")
+
+    val enterContent = {
+        sidebarExpanded = false
+        runCatching { contentFocus.requestFocus() }
+        Unit
     }
-    val sidebarWidth by animateDpAsState(if (sidebarExpanded) 178.dp else 0.dp, tween(240), label = "sidebarWidth")
-    val sidebarAlpha by animateFloatAsState(if (sidebarExpanded) 1f else 0f, tween(200), label = "sidebarAlpha")
+    val enterSidebar = {
+        sidebarExpanded = true
+        runCatching { groupFocus.requestFocus() }
+        Unit
+    }
 
     // The preview slot reports where it is so the shared video surface can sit exactly over it.
     DisposableEffect(Unit) { onDispose { onPreviewBounds(null) } }
@@ -292,14 +318,14 @@ private fun LiveBrowser(
                 groupName = group.title,
                 favorite = focused != null && favoriteKey(sourceId, focused) in favorites,
                 playing = focused != null && focused.id == playingChannelId,
-                quality = if (showQuality && focused?.id == playingChannelId) qualityLabel(videoHeight) else null,
+                quality = if (showQuality && focused?.id == playingChannelId) {
+                    listOfNotNull(qualityLabel(videoHeight), qualityClass(videoHeight)).joinToString(" · ").ifEmpty { null }
+                } else {
+                    null
+                },
+                showLogo = showLogos,
                 epg = epg,
                 infoFocus = infoFocus,
-                onFullscreen = {
-                    val i = channels.indexOfFirst { it.id == focused?.id }
-                    if (i >= 0) onFullscreen(channels, i)
-                },
-                onGuide = { onOpenGuide(channels) },
                 onToggleFavorite = { focused?.let(onToggleFavorite) },
                 onUp = { runCatching { dockFocus.requestFocus() } },
                 onDown = { runCatching { contentFocus.requestFocus() } },
@@ -307,7 +333,7 @@ private fun LiveBrowser(
             )
         }
 
-        // ---- bottom: categories and channels
+        // ---- bottom: categories, then channels or the guide
         Row(modifier = Modifier.weight(1f)) {
             Box(
                 modifier = Modifier
@@ -315,50 +341,93 @@ private fun LiveBrowser(
                     .fillMaxHeight()
                     .clipToBounds(),
             ) {
-                GroupList(
-                    groups = groups,
-                    selectedIndex = groupIndex.coerceIn(0, groups.lastIndex),
-                    onSelect = { groupIndex = it },
-                    selectedFocus = groupFocus,
-                    onRight = { runCatching { contentFocus.requestFocus() } },
+                Box(
                     modifier = Modifier
-                        .width(164.dp)
+                        .padding(end = 12.dp)
+                        .width(176.dp)
                         .fillMaxHeight()
-                        .graphicsLayer { alpha = sidebarAlpha },
-                )
+                        .graphicsLayer { alpha = sidebarAlpha }
+                        .background(SidebarColor, RoundedCornerShape(14.dp))
+                        .border(1.dp, SidebarEdge, RoundedCornerShape(14.dp)),
+                ) {
+                    GroupList(
+                        groups = groups,
+                        selectedIndex = groupIndex.coerceIn(0, groups.lastIndex),
+                        onSelect = { groupIndex = it },
+                        selectedFocus = groupFocus,
+                        onRight = { enterContent() },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
-            // A new list state per category, so switching starts at the top.
-            androidx.compose.runtime.key(groupIndex) {
-                ChannelList(
-                    channels = channels,
-                    sourceId = sourceId,
-                    favorites = favorites,
-                    epg = epg,
-                    focusedId = focused?.id,
-                    playingId = playingChannelId,
-                    onFocusChannel = onFocusChannel,
-                    onClickChannel = { i ->
-                        val channel = channels[i]
-                        if (channel.id == playingChannelId) onFullscreen(channels, i) else onSelect(channel)
-                    },
-                    onToggleFavorite = onToggleFavorite,
-                    onListFocus = { listHasFocus = it },
-                    onLeft = {
-                        sidebarExpanded = true
-                        runCatching { groupFocus.requestFocus() }
-                    },
-                    onUpFromTop = { runCatching { infoFocus.requestFocus() } },
-                    contentFocus = contentFocus,
-                    emptyText = if (group.kind == 1) {
-                        "No favorites yet. Press the Menu button on a channel, or use the star in the panel above."
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(14.dp))
+                    .glass(RoundedCornerShape(14.dp), GlassLevel.Panel),
+            ) {
+                // A new list state per category, so switching starts at the top.
+                androidx.compose.runtime.key(groupIndex) {
+                    if (group.kind == KIND_GUIDE) {
+                        GuideTimeline(
+                            channels = channels,
+                            currentId = playingChannelId ?: focusedChannelId,
+                            epg = epg,
+                            dpPerMinute = guideDpPerMinute,
+                            showLogos = showLogos,
+                            onPick = { channel ->
+                                if (channel.id == playingChannelId) {
+                                    val i = channels.indexOfFirst { it.id == channel.id }
+                                    if (i >= 0) onFullscreen(channels, i)
+                                } else {
+                                    onSelect(channel)
+                                }
+                            },
+                            onFocusChannel = onFocusChannel,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp)
+                                .focusRequester(contentFocus)
+                                .focusGroup()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                        // Move left inside the guide; from its first programme go back to the categories.
+                                        if (!focusManager.moveFocus(FocusDirection.Left)) enterSidebar()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
+                        )
                     } else {
-                        "No channels in this group."
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                )
+                        ChannelList(
+                            channels = channels,
+                            sourceId = sourceId,
+                            favorites = favorites,
+                            epg = epg,
+                            showLogos = showLogos,
+                            focusedId = focused?.id,
+                            playingId = playingChannelId,
+                            onFocusChannel = onFocusChannel,
+                            onClickChannel = { i ->
+                                val channel = channels[i]
+                                if (channel.id == playingChannelId) onFullscreen(channels, i) else onSelect(channel)
+                            },
+                            onToggleFavorite = onToggleFavorite,
+                            onLeft = { enterSidebar() },
+                            onUpFromTop = { runCatching { infoFocus.requestFocus() } },
+                            contentFocus = contentFocus,
+                            emptyText = if (group.kind == KIND_FAVORITES) {
+                                "No favorites yet. Press the Menu button on a channel, or use the star in the panel above."
+                            } else {
+                                "No channels in this group."
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             }
         }
     }
@@ -405,8 +474,8 @@ private fun GroupList(
 ) {
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(start = 2.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(6.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         itemsIndexed(groups) { i, g ->
             GroupItem(
@@ -436,7 +505,7 @@ private fun GroupItem(
             .tvFocusable(
                 onClick = onSelect,
                 shape = shape,
-                focusedScale = 1.03f,
+                focusedScale = 1.02f,
                 showOutline = false,
                 onFocusChange = {
                     focused = it
@@ -444,13 +513,14 @@ private fun GroupItem(
                 },
             )
             .then(
-                if (selected) {
-                    Modifier.glass(shape, if (focused) GlassLevel.Selected else GlassLevel.Control)
-                } else {
-                    Modifier
+                when {
+                    focused -> Modifier.glass(shape, GlassLevel.Selected)
+                    // The open category stays marked even while focus is in the list.
+                    selected -> Modifier.background(Color(0x26FFFFFF), shape)
+                    else -> Modifier
                 },
             )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 11.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -464,11 +534,13 @@ private fun GroupItem(
             maxLines = 1,
             modifier = Modifier.weight(1f),
         )
-        LumenText(
-            text = group.count.toString(),
-            style = LumenTheme.typography.label.copy(fontSize = 11.sp),
-            color = LumenTheme.colors.textTertiary,
-        )
+        if (group.kind != KIND_GUIDE) {
+            LumenText(
+                text = group.count.toString(),
+                style = LumenTheme.typography.label.copy(fontSize = 11.sp),
+                color = LumenTheme.colors.textTertiary,
+            )
+        }
     }
 }
 
@@ -480,12 +552,12 @@ private fun ChannelList(
     sourceId: String,
     favorites: Set<String>,
     epg: EpgCache?,
+    showLogos: Boolean,
     focusedId: String?,
     playingId: String?,
     onFocusChannel: (LiveChannel) -> Unit,
     onClickChannel: (Int) -> Unit,
     onToggleFavorite: (LiveChannel) -> Unit,
-    onListFocus: (Boolean) -> Unit,
     onLeft: () -> Unit,
     onUpFromTop: () -> Unit,
     contentFocus: FocusRequester,
@@ -515,7 +587,6 @@ private fun ChannelList(
     LazyColumn(
         state = listState,
         modifier = modifier
-            .onFocusChanged { onListFocus(it.hasFocus) }
             .focusGroup()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) {
@@ -541,7 +612,7 @@ private fun ChannelList(
                     }
                 }
             },
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         itemsIndexed(channels) { i, channel ->
@@ -550,6 +621,7 @@ private fun ChannelList(
             ChannelListRow(
                 channel = channel,
                 epg = epg,
+                showLogo = showLogos,
                 favorite = favoriteKey(sourceId, channel) in favorites,
                 playing = channel.id == playingId,
                 onFocus = { onFocusChannel(channel) },
@@ -570,10 +642,9 @@ private fun InfoPanel(
     favorite: Boolean,
     playing: Boolean,
     quality: String?,
+    showLogo: Boolean,
     epg: EpgCache?,
     infoFocus: FocusRequester,
-    onFullscreen: () -> Unit,
-    onGuide: () -> Unit,
     onToggleFavorite: () -> Unit,
     onUp: () -> Unit,
     onDown: () -> Unit,
@@ -614,15 +685,11 @@ private fun InfoPanel(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            ChannelLogo(channel, Modifier.width(40.dp).height(40.dp))
+            if (showLogo) ChannelLogo(channel, Modifier.width(40.dp).height(40.dp))
             Column(modifier = Modifier.weight(1f)) {
+                LumenText(channel.name, type.title.copy(fontSize = 18.sp), maxLines = 1)
                 LumenText(
-                    channel.name,
-                    type.title.copy(fontSize = 18.sp),
-                    maxLines = 1,
-                )
-                LumenText(
-                    text = "${channel.number} · $groupName" + (if (playing) " · Playing" else ""),
+                    text = groupName + (if (playing) " · Playing" else ""),
                     style = type.label.copy(fontSize = 12.sp),
                     color = if (playing) colors.accent else colors.textSecondary,
                     maxLines = 1,
@@ -633,6 +700,7 @@ private fun InfoPanel(
                     text = quality,
                     style = type.label.copy(fontSize = 11.sp),
                     color = colors.textSecondary,
+                    maxLines = 1,
                     modifier = Modifier
                         .glass(RoundedCornerShape(6.dp), GlassLevel.Panel)
                         .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -676,23 +744,16 @@ private fun InfoPanel(
 
         Spacer(Modifier.weight(1f))
 
+        // Favorite is the only control here; playback and the guide use the list and the remote.
         Row(
             modifier = Modifier
                 .focusGroup()
                 .onDirection(Key.DirectionUp, onUp)
                 .onDirection(Key.DirectionDown, onDown),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             LumenButton(
-                text = "Fullscreen",
-                modifier = Modifier.focusRequester(infoFocus),
-                primary = true,
-                compact = true,
-                onClick = onFullscreen,
-            )
-            LumenButton(text = "Guide", compact = true, onClick = onGuide)
-            LumenButton(
                 text = if (favorite) "★ Favorite" else "☆ Favorite",
+                modifier = Modifier.focusRequester(infoFocus),
                 compact = true,
                 onClick = onToggleFavorite,
             )

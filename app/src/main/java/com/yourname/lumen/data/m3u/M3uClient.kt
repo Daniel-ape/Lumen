@@ -64,7 +64,8 @@ class M3uClient(private val source: Source) : SourceClient {
     override suspend fun loadLive(): LiveContent = withContext(Dispatchers.Default) { parseM3u(readPlaylist()) }
 
     // Playlists have no movie or series library.
-    override suspend fun loadHome(): HomeContent = HomeContent(emptyList(), emptyList(), emptyList())
+    override suspend fun loadHome(onPartial: (HomeContent) -> Unit): HomeContent =
+        HomeContent(emptyList(), emptyList(), emptyList())
 
     override suspend fun loadDetails(item: MediaItem): MediaDetails? = null
 

@@ -32,7 +32,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.SubcomposeAsyncImage
+import com.yourname.lumen.core.util.logoRequest
 import com.yourname.lumen.core.designsystem.GlassLevel
 import com.yourname.lumen.core.designsystem.LumenProgressBar
 import com.yourname.lumen.core.designsystem.LumenText
@@ -46,7 +48,7 @@ import com.yourname.lumen.domain.model.LiveChannel
 import kotlinx.coroutines.delay
 
 /**
- * One compact channel row: logo and name on the left, what's on right now beside them.
+ * One compact channel row: logo and name on the left, what's on right now beside them (title, start and end time, progress).
  * - Focused: bright glass and a light outline.
  * - Playing (in the preview or fullscreen): an accent bar and accent number.
  * Programme details only appear when the source really provides them.
@@ -55,6 +57,7 @@ import kotlinx.coroutines.delay
 fun ChannelListRow(
     channel: LiveChannel,
     epg: EpgCache?,
+    showLogo: Boolean,
     favorite: Boolean,
     playing: Boolean,
     onFocus: () -> Unit,
@@ -111,16 +114,9 @@ fun ChannelListRow(
                 .clip(RoundedCornerShape(2.dp))
                 .background(if (playing) colors.accent else Color.Transparent),
         )
-        LumenText(
-            text = channel.number.toString(),
-            style = type.label.copy(fontSize = 11.sp),
-            color = if (playing) colors.accent else colors.textTertiary,
-            maxLines = 1,
-            modifier = Modifier.width(26.dp),
-        )
-        ChannelLogo(channel, Modifier.size(30.dp))
+        if (showLogo) ChannelLogo(channel, Modifier.size(30.dp))
         Row(
-            modifier = Modifier.width(150.dp),
+            modifier = Modifier.width(160.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -198,7 +194,7 @@ fun ChannelLogo(channel: LiveChannel, modifier: Modifier = Modifier) {
     ) {
         if (channel.logoUrl != null) {
             SubcomposeAsyncImage(
-                model = channel.logoUrl,
+                model = logoRequest(LocalContext.current, channel.logoUrl),
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier

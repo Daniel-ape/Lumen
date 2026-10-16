@@ -19,7 +19,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import com.yourname.lumen.core.util.posterRequest
 import com.yourname.lumen.core.designsystem.Dimens
 import com.yourname.lumen.core.designsystem.LogoTile
 import com.yourname.lumen.core.designsystem.LumenProgressBar
@@ -92,7 +94,7 @@ fun PosterCard(
     ) {
         if (imageUrl != null) {
             AsyncImage(
-                model = imageUrl,
+                model = posterRequest(LocalContext.current, imageUrl),
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

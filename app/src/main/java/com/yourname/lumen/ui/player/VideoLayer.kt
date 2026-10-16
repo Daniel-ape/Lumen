@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.yourname.lumen.R
 import com.yourname.lumen.core.designsystem.GlassLevel
@@ -34,6 +35,7 @@ fun VideoLayer(
     controller: PlaybackController,
     fullscreen: Boolean,
     previewBounds: Rect?,
+    scaleMode: Int,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -57,6 +59,13 @@ fun VideoLayer(
                     keepScreenOn = true
                     isFocusable = false
                     isFocusableInTouchMode = false
+                }
+            },
+            update = { view ->
+                view.resizeMode = when (scaleMode) {
+                    1 -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    2 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
             },
         )

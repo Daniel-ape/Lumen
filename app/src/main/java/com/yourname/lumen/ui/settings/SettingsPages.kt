@@ -1,6 +1,7 @@
 package com.yourname.lumen.ui.settings
 
 import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,14 +40,15 @@ import java.util.Locale
 
 private val CardShape = RoundedCornerShape(14.dp)
 
-// ---------- Connection
+// ============================================================ Sources
 
-internal fun LazyListScope.connectionItems(
+internal fun LazyListScope.sourcesItems(
     sources: List<Source>,
     info: SettingsInfo,
+    settings: AppSettings,
     actions: SettingsActions,
 ) {
-    item(key = "add_title") { SettingGroupTitle("Add a connection") }
+    item(key = "add_title") { SettingGroupTitle("Add a source") }
     item(key = "add_xtream") {
         SettingActionRow(
             label = "Xtream Codes API",
@@ -75,15 +77,16 @@ internal fun LazyListScope.connectionItems(
         )
     }
 
-    item(key = "saved_title") { SettingGroupTitle("Saved connections") }
+    item(key = "saved_title") { SettingGroupTitle("Saved sources") }
     if (sources.isEmpty()) {
-        item(key = "empty") { SettingNote("No connections yet.") }
+        item(key = "empty") { SettingNote("No sources yet.") }
     }
     items(sources, key = { it.id }) { source ->
         SourceCard(
             source = source,
             isActive = source.id == info.activeSourceId,
             testing = info.testingId == source.id,
+            confirmDelete = settings.confirmDestructive,
             actions = actions,
         )
     }
@@ -94,12 +97,12 @@ private fun SourceCard(
     source: Source,
     isActive: Boolean,
     testing: Boolean,
+    confirmDelete: Boolean,
     actions: SettingsActions,
 ) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
-    var confirming by remember(source.id) { mutableStateOf(false) }
-    val deleteFocus = remember { FocusRequester() }
+    val confirm = LocalConfirm.current
 
     val status = when {
         testing -> "Testing the connection…"
@@ -164,87 +167,228 @@ private fun SourceCard(
             LumenButton("Edit", compact = true, onClick = { actions.onEditSource(source) })
             LumenButton(
                 text = "Delete",
-                modifier = Modifier.focusRequester(deleteFocus),
                 compact = true,
-                onClick = { confirming = true },
-            )
-        }
-        if (confirming) {
-            LumenText("Delete this connection? Its login is removed from this device.", type.label)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LumenButton(
-                    text = "Yes, delete",
-                    primary = true,
-                    compact = true,
-                    onClick = {
-                        confirming = false
+                onClick = {
+                    if (confirmDelete) {
+                        confirm(
+                            ConfirmRequest(
+                                title = "Delete \"${source.name}\"?",
+                                message = "This removes the source and its login from this device. " +
+                                    "Your other sources, favorites and settings are not affected.",
+                                confirmLabel = "Delete",
+                                onConfirm = { actions.onRemoveSource(source) },
+                            ),
+                        )
+                    } else {
                         actions.onRemoveSource(source)
-                    },
-                )
-                LumenButton(
-                    text = "Cancel",
-                    compact = true,
-                    onClick = {
-                        confirming = false
-                        runCatching { deleteFocus.requestFocus() }
-                    },
-                )
-            }
+                    }
+                },
+            )
         }
     }
 }
 
-// ---------- EPG
+// ============================================================ Appearance (staged)
 
-private val OffsetOptions = listOf(
-    -180 to "−3 hours",
-    -120 to "−2 hours",
-    -60 to "−1 hour",
-    0 to "None",
-    60 to "+1 hour",
-    120 to "+2 hours",
-    180 to "+3 hours",
-)
+private val TextScaleOptions = listOf(0.9f to "Small", 1.0f to "Default", 1.15f to "Large", 1.3f to "Extra large")
+private val DensityOptions = listOf(0.9f to "Compact", 1.0f to "Comfortable", 1.1f to "Spacious")
 
-internal fun LazyListScope.epgItems(settings: AppSettings, actions: SettingsActions) {
-    item(key = "offset") {
-        val current = OffsetOptions.firstOrNull { it.first == settings.epgOffsetMinutes } ?: OffsetOptions[3]
+internal fun LazyListScope.appearanceItems(settings: AppSettings, actions: SettingsActions) {
+    if (settings.hasPendingAppearanceChanges) {
+        item(key = "restart_notice") { RestartNotice(settings, actions) }
+    }
+    item(key = "text_size") {
+        val current = TextScaleOptions.firstOrNull { it.first == settings.pending.textScale } ?: TextScaleOptions[1]
         SettingChoiceRow(
-            label = "Time offset",
-            description = "Shifts programme times if your source's guide is off by a few hours.",
+            label = "Text size",
+            description = "Applies after a restart.",
             value = current.second,
             onCycle = {
-                val next = OffsetOptions[(OffsetOptions.indexOf(current) + 1) % OffsetOptions.size]
-                settings.updateEpgOffsetMinutes(next.first)
+                val next = TextScaleOptions[(TextScaleOptions.indexOf(current) + 1) % TextScaleOptions.size]
+                settings.updatePending { it.copy(textScale = next.first) }
             },
         )
     }
-    item(key = "clear_guide") {
-        SettingActionRow(
-            label = "Refresh guide data",
-            description = "Forgets the programme information shown so far and asks your source again.",
-            onClick = actions.onClearGuideCache,
+    item(key = "text_preview") { TextSizePreview(settings) }
+    item(key = "density") {
+        val current = DensityOptions.firstOrNull { it.first == settings.pending.density } ?: DensityOptions[0]
+        SettingChoiceRow(
+            label = "Interface density",
+            description = "How large buttons, lists and spacing are. Applies after a restart.",
+            value = current.second,
+            onCycle = {
+                val next = DensityOptions[(DensityOptions.indexOf(current) + 1) % DensityOptions.size]
+                settings.updatePending { it.copy(density = next.first) }
+            },
         )
     }
-    item(key = "epg_note") {
-        SettingNote(
-            "Programme information comes from your own source. XMLTV guide files are not supported yet, " +
-                "and M3U playlists show no programme information.",
+    item(key = "background") {
+        SettingChoiceRow(
+            label = "Background",
+            description = "Reduced uses a flat charcoal instead of the soft gradient. Applies after a restart.",
+            value = if (settings.pending.reducedBackground) "Reduced effects" else "Standard",
+            onCycle = { settings.updatePending { it.copy(reducedBackground = !it.reducedBackground) } },
+        )
+    }
+    item(key = "motion") {
+        SettingChoiceRow(
+            label = "Animations",
+            description = "Reduced Motion turns off most transitions. Applies after a restart.",
+            value = if (settings.pending.reducedMotion) "Reduced motion" else "Standard",
+            onCycle = { settings.updatePending { it.copy(reducedMotion = !it.reducedMotion) } },
+        )
+    }
+    item(key = "reset_appearance") {
+        SettingActionRow(
+            label = "Reset appearance to defaults",
+            description = "Selects the default look. It still applies only after a restart.",
+            onClick = { settings.resetAppearance() },
+        )
+    }
+    item(key = "appearance_note") {
+        SettingNote("Theme options are not available yet: Lumen currently has its dark appearance only.")
+    }
+}
+
+@Composable
+private fun RestartNotice(settings: AppSettings, actions: SettingsActions) {
+    val type = LumenTheme.typography
+    val colors = LumenTheme.colors
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.accent.copy(alpha = 0.14f), shape)
+            .glass(shape, GlassLevel.Panel)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LumenText("Restart required", type.heading.copy(fontSize = 16.sp), color = colors.accent)
+        LumenText(
+            "Restart Lumen to apply your appearance changes. Your selected preferences have been saved and will take effect the next time you open the app.",
+            type.body.copy(fontSize = 13.sp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LumenButton("Restart Lumen", primary = true, compact = true, onClick = actions.onRestart)
+            LumenButton(
+                text = "Discard changes",
+                compact = true,
+                onClick = { settings.discardPendingAppearance() },
+            )
+        }
+        LumenText(
+            "If Lumen doesn't reopen by itself, close it and open it again from your app list.",
+            type.label.copy(fontSize = 11.sp),
+            color = colors.textSecondary,
         )
     }
 }
 
-// ---------- Playback
+@Composable
+private fun TextSizePreview(settings: AppSettings) {
+    val colors = LumenTheme.colors
+    // The running app keeps its current size, so the sample is scaled by the difference to show the chosen one.
+    val factor = settings.pending.textScale / settings.active.textScale
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glass(CardShape, GlassLevel.Panel)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        LumenText("Preview", LumenTheme.typography.label.copy(fontSize = 11.sp), color = colors.textSecondary)
+        LumenText(
+            text = "The quick brown fox jumps over the lazy dog.",
+            style = LumenTheme.typography.body.copy(fontSize = (14f * factor).sp, lineHeight = (20f * factor).sp),
+        )
+    }
+}
+
+// ============================================================ General
+
+private val RefreshOptions = listOf(0 to "Off", 6 to "Every 6 hours", 12 to "Every 12 hours", 24 to "Every day")
+private val StartOptions = listOf(0 to "Home", 1 to "Live TV")
+
+internal fun LazyListScope.generalItems(settings: AppSettings, actions: SettingsActions) {
+    item(key = "start") {
+        val current = StartOptions.firstOrNull { it.first == settings.startSection } ?: StartOptions[0]
+        SettingChoiceRow(
+            label = "Open Lumen on",
+            description = "The section shown when the app starts.",
+            value = current.second,
+            onCycle = {
+                val next = StartOptions[(StartOptions.indexOf(current) + 1) % StartOptions.size]
+                settings.updateStartSection(next.first)
+            },
+        )
+    }
+    item(key = "autorefresh") {
+        val current = RefreshOptions.firstOrNull { it.first == settings.autoRefreshHours } ?: RefreshOptions[0]
+        SettingChoiceRow(
+            label = "Auto-refresh",
+            description = "Reloads your channels and library while the app is open.",
+            value = current.second,
+            onCycle = {
+                val next = RefreshOptions[(RefreshOptions.indexOf(current) + 1) % RefreshOptions.size]
+                settings.updateAutoRefreshHours(next.first)
+            },
+        )
+    }
+    item(key = "confirm") {
+        SettingToggleRow(
+            label = "Confirm before deleting",
+            description = "Ask first when deleting a source or clearing stored data.",
+            checked = settings.confirmDestructive,
+            onToggle = { settings.updateConfirmDestructive(!settings.confirmDestructive) },
+        )
+    }
+    item(key = "reset_prefs") {
+        val confirm = LocalConfirm.current
+        SettingActionRow(
+            label = "Reset preferences",
+            description = "Puts these settings back to their defaults. Sources, logins, favorites and appearance are not touched.",
+            onClick = {
+                confirm(
+                    ConfirmRequest(
+                        title = "Reset preferences?",
+                        message = "General, Player, Live TV and Movies & Series settings go back to their defaults. " +
+                            "Your sources, logins, favorites and appearance stay as they are.",
+                        confirmLabel = "Reset",
+                        onConfirm = { settings.resetPreferences() },
+                    ),
+                )
+            },
+        )
+    }
+    item(key = "general_note") {
+        SettingNote("These settings take effect straight away, except \"Open Lumen on\", which is used the next time the app starts.")
+    }
+}
+
+// ============================================================ Player
 
 private val OverlayOptions = listOf(3 to "3 seconds", 5 to "5 seconds", 8 to "8 seconds")
+private val ScaleModeOptions = listOf(0 to "Fit", 1 to "Fill", 2 to "Zoom")
 
-internal fun LazyListScope.playbackItems(settings: AppSettings) {
+internal fun LazyListScope.playerItems(settings: AppSettings) {
     item(key = "format") {
         SettingChoiceRow(
             label = "Stream format",
             description = "Which format to try first. Lumen switches to the other one if it fails.",
             value = if (settings.preferTs) "TS first" else "HLS first",
             onCycle = { settings.updatePreferTs(!settings.preferTs) },
+        )
+    }
+    item(key = "scaling") {
+        val current = ScaleModeOptions.firstOrNull { it.first == settings.videoScale } ?: ScaleModeOptions[0]
+        SettingChoiceRow(
+            label = "Picture scaling",
+            description = "Fit shows the whole picture, Fill stretches it, Zoom crops to fill the screen.",
+            value = current.second,
+            onCycle = {
+                val next = ScaleModeOptions[(ScaleModeOptions.indexOf(current) + 1) % ScaleModeOptions.size]
+                settings.updateVideoScale(next.first)
+            },
         )
     }
     item(key = "sound") {
@@ -257,8 +401,8 @@ internal fun LazyListScope.playbackItems(settings: AppSettings) {
     }
     item(key = "quality") {
         SettingToggleRow(
-            label = "Show video quality",
-            description = "Shows 720p, 1080p or 4K when the player can tell.",
+            label = "Show stream information",
+            description = "Shows resolution and audio format in the info bar when the player can tell.",
             checked = settings.showQuality,
             onToggle = { settings.updateShowQuality(!settings.showQuality) },
         )
@@ -275,25 +419,97 @@ internal fun LazyListScope.playbackItems(settings: AppSettings) {
             },
         )
     }
+    item(key = "player_note") {
+        SettingNote("Subtitle and audio-track choices are not available yet. All Player settings apply immediately.")
+    }
 }
 
-// ---------- Appearance
+// ============================================================ Live TV
 
-private val ScaleOptions = listOf(0.9f to "Small", 1.0f to "Default", 1.1f to "Large")
+private val GuideDensityOptions = listOf(0 to "Compact", 1 to "Standard", 2 to "Wide")
+private val LiveStartOptions = listOf(0 to "All channels", 1 to "Favorites", 2 to "TV Guide")
+private val OffsetOptions = listOf(
+    -180 to "−3 hours",
+    -120 to "−2 hours",
+    -60 to "−1 hour",
+    0 to "None",
+    60 to "+1 hour",
+    120 to "+2 hours",
+    180 to "+3 hours",
+)
 
-internal fun LazyListScope.appearanceItems(settings: AppSettings) {
-    item(key = "scale") {
-        val current = ScaleOptions.firstOrNull { it.first == settings.uiScale } ?: ScaleOptions[0]
+internal fun LazyListScope.liveTvItems(settings: AppSettings) {
+    item(key = "live_start") {
+        val current = LiveStartOptions.firstOrNull { it.first == settings.liveStartGroup } ?: LiveStartOptions[0]
         SettingChoiceRow(
-            label = "Interface size",
-            description = "Makes text and buttons smaller or larger.",
+            label = "Open Live TV on",
+            description = "The view shown when you open Live TV.",
             value = current.second,
             onCycle = {
-                val next = ScaleOptions[(ScaleOptions.indexOf(current) + 1) % ScaleOptions.size]
-                settings.updateUiScale(next.first)
+                val next = LiveStartOptions[(LiveStartOptions.indexOf(current) + 1) % LiveStartOptions.size]
+                settings.updateLiveStartGroup(next.first)
             },
         )
     }
+    item(key = "remember") {
+        SettingToggleRow(
+            label = "Remember the last channel",
+            description = "Opens Live TV with the channel you were watching highlighted.",
+            checked = settings.rememberLastChannel,
+            onToggle = { settings.updateRememberLastChannel(!settings.rememberLastChannel) },
+        )
+    }
+    item(key = "time_format") {
+        SettingChoiceRow(
+            label = "Time format",
+            description = "How programme times are shown.",
+            value = if (settings.use24h) "24-hour" else "12-hour",
+            onCycle = { settings.updateUse24h(!settings.use24h) },
+        )
+    }
+    item(key = "guide_density") {
+        val current = GuideDensityOptions.firstOrNull { it.first == settings.guideDensity } ?: GuideDensityOptions[1]
+        SettingChoiceRow(
+            label = "Guide width",
+            description = "How much room each minute gets in the programme guide.",
+            value = current.second,
+            onCycle = {
+                val next = GuideDensityOptions[(GuideDensityOptions.indexOf(current) + 1) % GuideDensityOptions.size]
+                settings.updateGuideDensity(next.first)
+            },
+        )
+    }
+    item(key = "logos") {
+        SettingToggleRow(
+            label = "Show channel logos",
+            description = "Shows each channel's logo in lists and in the guide.",
+            checked = settings.showLogos,
+            onToggle = { settings.updateShowLogos(!settings.showLogos) },
+        )
+    }
+    item(key = "offset") {
+        val current = OffsetOptions.firstOrNull { it.first == settings.epgOffsetMinutes } ?: OffsetOptions[3]
+        SettingChoiceRow(
+            label = "Guide time offset",
+            description = "Shifts programme times if your source's guide is off by a few hours.",
+            value = current.second,
+            onCycle = {
+                val next = OffsetOptions[(OffsetOptions.indexOf(current) + 1) % OffsetOptions.size]
+                settings.updateEpgOffsetMinutes(next.first)
+            },
+        )
+    }
+    item(key = "live_note") {
+        SettingNote(
+            "Programme information comes from your own source. XMLTV guide files are not supported yet, " +
+                "and M3U playlists show no programme information.",
+        )
+    }
+}
+
+// ============================================================ Movies & Series
+
+internal fun LazyListScope.contentItems(settings: AppSettings) {
     item(key = "ratings") {
         SettingToggleRow(
             label = "Show ratings on posters",
@@ -312,45 +528,84 @@ internal fun LazyListScope.appearanceItems(settings: AppSettings) {
     }
 }
 
-// ---------- General
+// ============================================================ Storage & Data
 
-private val RefreshOptions = listOf(0 to "Off", 6 to "Every 6 hours", 12 to "Every 12 hours", 24 to "Every day")
-
-internal fun LazyListScope.generalItems(
-    settings: AppSettings,
-    info: SettingsInfo,
-    actions: SettingsActions,
-) {
-    item(key = "autorefresh") {
-        val current = RefreshOptions.firstOrNull { it.first == settings.autoRefreshHours } ?: RefreshOptions[0]
-        SettingChoiceRow(
-            label = "Auto-refresh",
-            description = "Reloads your channels and library while the app is open.",
-            value = current.second,
-            onCycle = {
-                val next = RefreshOptions[(RefreshOptions.indexOf(current) + 1) % RefreshOptions.size]
-                settings.updateAutoRefreshHours(next.first)
-            },
-        )
+internal fun LazyListScope.storageItems(info: SettingsInfo, settings: AppSettings, actions: SettingsActions) {
+    item(key = "usage") {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SettingInfoRow("Cached pictures", formatBytes(info.imageCacheBytes))
+            SettingInfoRow("Saved library data", formatBytes(info.libraryCacheBytes))
+        }
     }
     item(key = "refresh") {
         SettingActionRow(
-            label = "Refresh now",
+            label = "Refresh content",
             description = if (info.lastRefreshAt == 0L) {
-                "Not refreshed yet in this session."
+                "Reloads your channels and library from the active source."
             } else {
-                "Last refreshed ${formatDateTime(info.lastRefreshAt)}."
+                "Reloads from the active source. Last refreshed ${formatDateTime(info.lastRefreshAt)}."
             },
             onClick = actions.onRefreshData,
         )
     }
-    item(key = "cache") {
+    item(key = "refresh_guide") {
         SettingActionRow(
-            label = "Clear image cache",
-            description = "Using ${formatBytes(info.imageCacheBytes)}. Pictures download again when needed.",
-            onClick = actions.onClearImageCache,
+            label = "Refresh guide data",
+            description = "Forgets the programme information shown so far and asks your source again.",
+            onClick = actions.onClearGuideCache,
         )
     }
+    item(key = "clear_images") {
+        val confirm = LocalConfirm.current
+        SettingActionRow(
+            label = "Clear cached pictures",
+            description = "Posters and logos download again when needed.",
+            onClick = {
+                val run = actions.onClearImageCache
+                if (settings.confirmDestructive) {
+                    confirm(
+                        ConfirmRequest(
+                            title = "Clear cached pictures?",
+                            message = "Posters, backdrops and logos stored on this device are deleted and download again when needed. Nothing else is affected.",
+                            confirmLabel = "Clear",
+                            onConfirm = run,
+                        ),
+                    )
+                } else {
+                    run()
+                }
+            },
+        )
+    }
+    item(key = "clear_library") {
+        val confirm = LocalConfirm.current
+        SettingActionRow(
+            label = "Clear saved library data",
+            description = "Removes the saved copy of your channel list and Home content. It loads again from your source.",
+            onClick = {
+                val run = actions.onClearLibraryCache
+                if (settings.confirmDestructive) {
+                    confirm(
+                        ConfirmRequest(
+                            title = "Clear saved library data?",
+                            message = "The saved channel list and Home content are deleted and loaded again from your source. " +
+                                "Your sources, logins, favorites and settings are not affected.",
+                            confirmLabel = "Clear",
+                            onConfirm = run,
+                        ),
+                    )
+                } else {
+                    run()
+                }
+            },
+        )
+    }
+}
+
+// ============================================================ About & Support
+
+internal fun LazyListScope.aboutItems() {
+    item(key = "about") { AboutContent() }
     item(key = "diag_title") { SettingGroupTitle("Diagnostics") }
     item(key = "diag") {
         val entries = AppLog.entries
@@ -377,12 +632,6 @@ internal fun LazyListScope.generalItems(
     }
 }
 
-// ---------- About & Support
-
-internal fun LazyListScope.aboutItems() {
-    item(key = "about") { AboutContent() }
-}
-
 @Composable
 private fun AboutContent() {
     val context = LocalContext.current
@@ -404,13 +653,13 @@ private fun AboutContent() {
         SettingGroupTitle("Troubleshooting")
         SettingNote("Can't connect: check that the address includes the port (for example http://server:8080), then press Test.")
         SettingNote("Login rejected: use Edit to re-enter the username and password.")
-        SettingNote("A channel won't play: try Stream format under Playback, or press OK to retry.")
+        SettingNote("A channel won't play: try Stream format under Player, or press OK to retry.")
         SettingNote("No programme information: your source may not provide it for that channel.")
-        SettingNote("Pictures are missing: try Clear image cache under General.")
+        SettingNote("Pictures are missing: try Clear cached pictures under Storage & Data.")
     }
 }
 
-// ---------- helpers
+// ============================================================ helpers
 
 private fun formatDateTime(millis: Long): String =
     SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(millis))

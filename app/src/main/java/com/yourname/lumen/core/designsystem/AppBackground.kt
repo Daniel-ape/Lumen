@@ -1,5 +1,6 @@
 package com.yourname.lumen.core.designsystem
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -16,6 +17,10 @@ import androidx.compose.ui.graphics.Color
  */
 @Composable
 fun AppBackground(modifier: Modifier = Modifier) {
+    if (LocalAppearanceFlags.current.reducedBackground) {
+        Box(modifier = modifier.fillMaxSize().background(Color(0xFF16181C)))
+        return
+    }
     Box(
         modifier = modifier
             .fillMaxSize()

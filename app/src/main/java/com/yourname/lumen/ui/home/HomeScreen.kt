@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -48,12 +48,18 @@ fun HomeScreen(
     showRatings: Boolean,
     autoRotate: Boolean,
     onOpenDetails: (MediaItem) -> Unit,
+    onRowOpen: (MediaItem) -> Unit,
     onAtTopChange: (Boolean) -> Unit,
     onAddSource: () -> Unit,
     onRetry: () -> Unit,
+    listState: LazyListState,
+    rowStates: List<LazyListState>,
+    heroIndex: Int,
+    onHeroIndex: (Int) -> Unit,
+    restoreItemId: String?,
+    onRestored: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val topInset = with(LocalDensity.current) { 72.dp.roundToPx() }
     val rowFocus = remember { List(2) { FocusRequester() } }
@@ -74,8 +80,9 @@ fun HomeScreen(
     // Tell the app when we are at the very top so it can hide or show the dock.
     // Two thresholds (leave at 80px, return at 8px) stop it flickering near the edge.
     LaunchedEffect(listState) {
-        var atTop = true
-        onAtTopChange(true)
+        // Start from where the page really is, so coming back mid-scroll keeps the dock hidden.
+        var atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 8
+        onAtTopChange(atTop)
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
                 val next = if (atTop) !(index > 0 || offset > 80) else (index == 0 && offset <= 8)
@@ -165,6 +172,8 @@ fun HomeScreen(
                         item {
                             HeroSection(
                                 items = state.content.hero,
+                                index = heroIndex,
+                                onIndexChange = onHeroIndex,
                                 contentFocus = contentFocus,
                                 onUp = goToDock,
                                 onDown = { if (rows.isNotEmpty()) goToRow(0) },
@@ -182,7 +191,10 @@ fun HomeScreen(
                                     PosterRow(
                                         items = row.second,
                                         showRatings = showRatings,
-                                        onOpen = onOpenDetails,
+                                        onOpen = onRowOpen,
+                                        state = rowStates[k],
+                                        restoreItemId = restoreItemId,
+                                        onRestored = onRestored,
                                         firstFocus = rowFocus[k],
                                         onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
                                         onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
@@ -202,11 +214,15 @@ private fun PosterRow(
     items: List<MediaItem>,
     showRatings: Boolean,
     onOpen: (MediaItem) -> Unit,
+    state: LazyListState,
+    restoreItemId: String?,
+    onRestored: () -> Unit,
     firstFocus: FocusRequester,
     onUp: () -> Unit,
     onDown: () -> Unit,
 ) {
     LazyRow(
+        state = state,
         // The requester sits on the whole row, so it works even after the row was scrolled sideways.
         modifier = Modifier
             .focusRequester(firstFocus)
@@ -218,6 +234,15 @@ private fun PosterRow(
         horizontalArrangement = Arrangement.spacedBy(Dimens.RowGap),
     ) {
         items(items) { m ->
+            // After coming back from a details page, focus returns to the poster that was opened.
+            val restore = remember { FocusRequester() }
+            val isRestoreTarget = restoreItemId != null && m.id == restoreItemId
+            LaunchedEffect(isRestoreTarget) {
+                if (isRestoreTarget) {
+                    runCatching { restore.requestFocus() }
+                    onRestored()
+                }
+            }
             PosterCard(
                 title = m.title,
                 subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
@@ -225,6 +250,7 @@ private fun PosterRow(
                 hue = hueOf(m.title),
                 imageUrl = m.posterUrl,
                 onClick = { onOpen(m) },
+                modifier = if (isRestoreTarget) Modifier.focusRequester(restore) else Modifier,
             )
         }
     }

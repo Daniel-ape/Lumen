@@ -75,12 +75,32 @@ object LumenTheme {
         get() = LocalLumenTypography.current
 }
 
+/** Settings that change how things are drawn. They are fixed for a whole session. */
+@Immutable
+data class AppearanceFlags(val reducedMotion: Boolean = false, val reducedBackground: Boolean = false)
+
+val LocalAppearanceFlags = staticCompositionLocalOf { AppearanceFlags() }
+
+/** Animation length: 0 when the user chose Reduced Motion. */
 @Composable
-/** [uiScale] scales every dp and sp in the app at once. 1.0 = normal. */
-fun LumenTheme(uiScale: Float = 1f, content: @Composable () -> Unit) {
+@ReadOnlyComposable
+fun motionMs(ms: Int): Int = if (LocalAppearanceFlags.current.reducedMotion) 0 else ms
+
+/**
+ * [density] scales every dp and sp in the app at once (0.9 compact, 1.0 comfortable, 1.1 spacious).
+ * [textScale] scales text only.
+ */
+@Composable
+fun LumenTheme(
+    density: Float = 0.9f,
+    textScale: Float = 1f,
+    flags: AppearanceFlags = AppearanceFlags(),
+    content: @Composable () -> Unit,
+) {
     val base = LocalDensity.current
     CompositionLocalProvider(
-        LocalDensity provides Density(density = base.density * uiScale, fontScale = base.fontScale),
+        LocalDensity provides Density(density = base.density * density, fontScale = base.fontScale * textScale),
+        LocalAppearanceFlags provides flags,
         LocalLumenColors provides DarkColors,
         LocalLumenTypography provides DefaultTypography,
         content = content,

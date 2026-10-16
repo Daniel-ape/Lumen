@@ -85,29 +85,38 @@ class XtreamClient(private val source: Source) : SourceClient {
         ConnectionResult.Failed(describeFailure(e))
     }
 
-    override suspend fun loadHome(): HomeContent = coroutineScope {
+    override suspend fun loadHome(onPartial: (HomeContent) -> Unit): HomeContent = coroutineScope {
         val moviesJob = async { runCatching { newestMovies() } }
         val seriesJob = async { runCatching { newestSeries() } }
-        val moviesResult = moviesJob.await()
+
+        // Series lists already include backdrops, so they can fill the hero and a row straight away.
         val seriesResult = seriesJob.await()
+        val series = seriesResult.getOrDefault(emptyList())
+        val heroSeries = (series.filter { it.backdropUrl != null }.ifEmpty { series }).take(3)
+        if (series.isNotEmpty()) {
+            onPartial(HomeContent(hero = heroSeries, movies = emptyList(), series = series.take(20)))
+        }
+
+        val moviesResult = moviesJob.await()
         if (moviesResult.isFailure && seriesResult.isFailure) {
             throw moviesResult.exceptionOrNull() ?: IOException("No data")
         }
         val movies = moviesResult.getOrDefault(emptyList())
-        val series = seriesResult.getOrDefault(emptyList())
+        if (movies.isNotEmpty()) {
+            onPartial(HomeContent(hero = heroSeries, movies = movies.take(20), series = series.take(20)))
+        }
 
-        // Movies only have a small poster in the list, so ask for the big backdrop of the few we feature.
-        // Check a few more movies and keep the ones that have a proper wide backdrop.
+        // Movies only have a small poster in the list, so ask for the wide backdrop of the few we feature.
         val movieCandidates = movies.take(6).map { async { withDetails(it) } }.awaitAll()
         val heroMovies = movieCandidates.filter { it.backdropUrl != null }.ifEmpty { movieCandidates }.take(3)
-        val heroSeries = (series.filter { it.backdropUrl != null }.ifEmpty { series }).take(2)
 
+        // Only titles with usable artwork can be featured.
         val hero = buildList {
             for (i in 0 until maxOf(heroMovies.size, heroSeries.size)) {
                 heroMovies.getOrNull(i)?.let { add(it) }
                 heroSeries.getOrNull(i)?.let { add(it) }
             }
-        }
+        }.filter { it.backdropUrl != null || it.posterUrl != null }
         HomeContent(hero = hero, movies = movies.take(20), series = series.take(20))
     }
 
@@ -234,7 +243,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                 .map { toProgram(it, offsetSec) }
                 .filter { it.title.isNotBlank() && (it.endSec == null || it.endSec > nowSec) }
                 .sortedBy { it.startSec ?: Long.MAX_VALUE }
-                .take(12)
+                .take(40)
         }
 
     private fun toProgram(o: JSONObject, offsetSec: Long): ProgramInfo = ProgramInfo(

@@ -3,6 +3,7 @@ package com.yourname.lumen.data.epg
 import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.NowNext
+import com.yourname.lumen.domain.model.ProgramInfo
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -44,9 +45,37 @@ class EpgCache(
         }
     }
 
-    suspend fun schedule(channel: LiveChannel) = client.schedule(channel, offsetSec)
+    private class ScheduleEntry(val value: List<ProgramInfo>, val fetchedAt: Long)
 
-    fun clear() = entries.clear()
+    private val schedules = HashMap<String, ScheduleEntry>()
+
+    /** Last known schedule for a channel, or null if none yet or if it is old. */
+    fun peekSchedule(channel: LiveChannel): List<ProgramInfo>? {
+        val entry = schedules[channel.id] ?: return null
+        return if (System.currentTimeMillis() - entry.fetchedAt < SCHEDULE_MAX_AGE_MS) entry.value else null
+    }
+
+    /** A channel's upcoming programmes. Failed or empty answers become an empty list: no information. */
+    suspend fun schedule(channel: LiveChannel): List<ProgramInfo> {
+        peekSchedule(channel)?.let { return it }
+        return gate.withPermit {
+            peekSchedule(channel)?.let { return@withPermit it }
+            val value = try {
+                client.schedule(channel, offsetSec)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            schedules[channel.id] = ScheduleEntry(value, System.currentTimeMillis())
+            value
+        }
+    }
+
+    fun clear() {
+        entries.clear()
+        schedules.clear()
+    }
 
     private fun isFresh(entry: Entry): Boolean {
         val now = System.currentTimeMillis()
@@ -57,5 +86,6 @@ class EpgCache(
 
     private companion object {
         const val MAX_AGE_MS = 5 * 60 * 1000L
+        const val SCHEDULE_MAX_AGE_MS = 10 * 60 * 1000L
     }
 }
