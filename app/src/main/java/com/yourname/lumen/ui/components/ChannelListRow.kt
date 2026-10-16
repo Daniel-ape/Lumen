@@ -55,16 +55,16 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun ChannelListRow(
-    channel = channel,
-    epg = epg,
-    showLogo = true,
-    favorite = favoriteKeyOf(channel) in favorites,
-    playing = channel.id == currentId,
-    onFocus = { focusedId = channel.id },
-    onClick = { onPick(channel) },
-    onMenu = {},
-    modifier = if (i == startIndex) Modifier.focusRequester(startFocus) else Modifier,
-)
+    channel: LiveChannel,
+    epg: EpgCache?,
+    showLogo: Boolean,
+    favorite: Boolean,
+    playing: Boolean,
+    onFocus: () -> Unit,
+    onClick: () -> Unit,
+    onMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
     var focused by remember { mutableStateOf(false) }
