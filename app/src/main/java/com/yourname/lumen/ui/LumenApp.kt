@@ -228,7 +228,9 @@ fun LumenApp(settings: AppSettings) {
     LaunchedEffect(formType, detailsItem, homeState, liveState, section, fullscreen) {
         val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
         if (formType == null && detailsItem == null && !fullscreen && ready && !dockHasFocus && restoreItemId == null) {
-            runCatching { contentFocus.requestFocus() }
+            // If the page has nothing to focus yet, fall back to the dock so the remote is never dead.
+            val ok = runCatching { contentFocus.requestFocus() }.isSuccess
+            if (!ok) runCatching { dockFocus.requestFocus() }
         }
     }
 
@@ -425,7 +427,6 @@ fun LumenApp(settings: AppSettings) {
                             videoHeight = controller.videoHeight,
                             showQuality = settings.showQuality,
                             showLogos = settings.showLogos,
-                            guideDpPerMinute = guideDpPerMinute,
                             initialGroup = settings.liveStartGroup,
                             epg = epg,
                             onFocusChannel = { focusedChannelId = it.id },

@@ -170,8 +170,8 @@ class AppSettings(context: Context) {
     var lastChannelId by mutableStateOf<String?>(prefs.getString(KEY_LAST_CHANNEL, null))
         private set
 
-    /** 0 = All channels, 1 = Favorites, 2 = TV Guide. */
-    var liveStartGroup by mutableIntStateOf(prefs.getInt(KEY_LIVE_GROUP, 0))
+    /** 0 = All channels, 1 = Favorites. */
+    var liveStartGroup by mutableIntStateOf(prefs.getInt(KEY_LIVE_GROUP, 0).coerceIn(0, 1))
         private set
 
     init {

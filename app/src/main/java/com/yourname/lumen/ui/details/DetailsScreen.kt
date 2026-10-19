@@ -49,7 +49,7 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import kotlin.coroutines.cancellation.CancellationException
 
-private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
+private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 2f), blurRadius = 8f)
 
 /**
  * Details for one movie or series. Shows what the list already knew right away, then fills in

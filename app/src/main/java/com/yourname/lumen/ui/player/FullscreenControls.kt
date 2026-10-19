@@ -128,7 +128,10 @@ fun FullscreenControls(
                 runCatching { guideFocus.requestFocus() }
             }
 
-            else -> runCatching { rootFocus.requestFocus() }
+            else -> repeat(3) {
+                runCatching { rootFocus.requestFocus() }
+                delay(40)
+            }
         }
     }
 

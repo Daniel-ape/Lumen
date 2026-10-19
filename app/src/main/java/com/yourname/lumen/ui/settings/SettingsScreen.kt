@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import com.yourname.lumen.core.designsystem.Dimens
 import com.yourname.lumen.core.designsystem.GearIcon
 import com.yourname.lumen.core.designsystem.GlassLevel
@@ -129,6 +130,18 @@ fun SettingsScreen(
     val focusManager = LocalFocusManager.current
 
     val pending = settings.hasPendingAppearanceChanges
+
+    // When a question closes its dialog is removed, so put focus back on the open category.
+    var dialogWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(confirm == null) {
+        if (confirm != null) {
+            dialogWasOpen = true
+        } else if (dialogWasOpen) {
+            dialogWasOpen = false
+            delay(60)
+            runCatching { sidebarFocus[selected.ordinal].requestFocus() }
+        }
+    }
 
     CompositionLocalProvider(LocalConfirm provides { confirm = it }) {
         val request = confirm

@@ -427,7 +427,7 @@ internal fun LazyListScope.playerItems(settings: AppSettings) {
 // ============================================================ Live TV
 
 private val GuideDensityOptions = listOf(0 to "Compact", 1 to "Standard", 2 to "Wide")
-private val LiveStartOptions = listOf(0 to "All channels", 1 to "Favorites", 2 to "TV Guide")
+private val LiveStartOptions = listOf(0 to "All channels", 1 to "Favorites")
 private val OffsetOptions = listOf(
     -180 to "−3 hours",
     -120 to "−2 hours",

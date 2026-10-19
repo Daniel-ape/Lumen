@@ -102,6 +102,14 @@ fun GuideTimeline(
     val startIndex = channels.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (startIndex - 1).coerceAtLeast(0))
     var focusDone by remember { mutableStateOf(false) }
+    val fallbackFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(1_400)
+        if (!focusDone) {
+            runCatching { fallbackFocus.requestFocus() }
+            focusDone = true
+        }
+    }
 
     Column(modifier = modifier) {
         // time axis
@@ -131,6 +139,7 @@ fun GuideTimeline(
                     scroll = scroll,
                     showLogos = showLogos,
                     isCurrent = channel.id == currentId || (currentId == null && i == 0),
+                    fallbackFocus = if (i == 0) fallbackFocus else null,
                     focusPending = !focusDone,
                     onAutoFocused = { focusDone = true },
                     onPick = onPick,
@@ -188,6 +197,7 @@ private fun GuideRow(
     scroll: androidx.compose.foundation.ScrollState,
     showLogos: Boolean,
     isCurrent: Boolean,
+    fallbackFocus: FocusRequester?,
     focusPending: Boolean,
     onAutoFocused: () -> Unit,
     onPick: (LiveChannel) -> Unit,
@@ -242,6 +252,7 @@ private fun GuideRow(
                     if (w < 14.dp) return@forEach
                     val isNow = start <= now && now < end
                     ProgrammeBlock(
+                        fallback = if (placed == 0) fallbackFocus else null,
                         program = program,
                         x = x,
                         width = w,
@@ -256,6 +267,7 @@ private fun GuideRow(
                 if (placed == 0 && loaded) {
                     // No guide data: one quiet block so the row can still be selected.
                     EmptyBlock(
+                        fallback = fallbackFocus,
                         width = totalWidth,
                         autoFocus = focusPending && isCurrent,
                         onAutoFocused = onAutoFocused,
@@ -280,6 +292,7 @@ private fun GuideRow(
 
 @Composable
 private fun ProgrammeBlock(
+    fallback: FocusRequester?,
     program: ProgramInfo,
     x: Dp,
     width: Dp,
@@ -292,7 +305,8 @@ private fun ProgrammeBlock(
     val type = LumenTheme.typography
     val colors = LumenTheme.colors
     var focused by remember { mutableStateOf(false) }
-    val requester = remember { FocusRequester() }
+    val ownRequester = remember { FocusRequester() }
+    val requester = fallback ?: ownRequester
     val shape = RoundedCornerShape(8.dp)
 
     LaunchedEffect(autoFocus) {
@@ -348,6 +362,7 @@ private fun ProgrammeBlock(
 
 @Composable
 private fun EmptyBlock(
+    fallback: FocusRequester?,
     width: Dp,
     autoFocus: Boolean,
     onAutoFocused: () -> Unit,
@@ -355,7 +370,8 @@ private fun EmptyBlock(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val requester = remember { FocusRequester() }
+    val ownRequester = remember { FocusRequester() }
+    val requester = fallback ?: ownRequester
     val shape = RoundedCornerShape(8.dp)
     LaunchedEffect(autoFocus) {
         if (autoFocus) {

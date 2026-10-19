@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -53,8 +54,12 @@ import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.core.util.backdropRequest
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
+import kotlinx.coroutines.flow.collectLatest
 
-private val TextShadow = Shadow(color = Color(0xCC000000), offset = Offset(0f, 3f), blurRadius = 14f)
+private val TextShadow = Shadow(color = Color(0xB3000000), offset = Offset(0f, 2f), blurRadius = 8f)
+
+// The colour at the bottom of the app background, so the picture melts into it with no edge.
+private val HeroFade = Color(0xFF121418)
 private const val SLIDE_MS = 8_000
 
 /**
@@ -85,11 +90,13 @@ fun HeroSection(
 
     // Every change of slide, pause or setting restarts the timer from zero, and an old timer is
     // cancelled first, so quick presses can never leave two timers running or skip a slide.
-    LaunchedEffect(current, paused, autoRotate, items.size) {
-        progress.snapTo(0f)
-        if (autoRotate && !paused && items.size > 1) {
-            progress.animateTo(1f, tween(SLIDE_MS, easing = LinearEasing))
-            onIndexChange((current + 1) % items.size)
+    LaunchedEffect(current, autoRotate, items.size) {
+        snapshotFlow { paused }.collectLatest { isPaused ->
+            progress.snapTo(0f)
+            if (autoRotate && !isPaused && items.size > 1) {
+                progress.animateTo(1f, tween(SLIDE_MS, easing = LinearEasing))
+                onIndexChange((current + 1) % items.size)
+            }
         }
     }
 
@@ -114,10 +121,11 @@ fun HeroSection(
                             .fillMaxSize()
                             .background(
                                 Brush.verticalGradient(
-                                    0.42f to Color.Transparent,
-                                    0.68f to LumenTheme.colors.background.copy(alpha = 0.35f),
-                                    0.86f to LumenTheme.colors.background.copy(alpha = 0.80f),
-                                    1f to LumenTheme.colors.background,
+                                    0.38f to Color.Transparent,
+                                    0.58f to HeroFade.copy(alpha = 0.30f),
+                                    0.76f to HeroFade.copy(alpha = 0.72f),
+                                    0.92f to HeroFade.copy(alpha = 0.95f),
+                                    1f to HeroFade,
                                 ),
                             ),
                     )
