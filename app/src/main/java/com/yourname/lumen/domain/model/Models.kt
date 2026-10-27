@@ -77,6 +77,8 @@ data class LiveChannel(
     val categoryId: String,
     /** Direct stream address, for sources (like M3U playlists) that list one per channel. */
     val streamUrl: String? = null,
+    /** The id the source's programme guide uses for this channel, when it has one. */
+    val epgId: String? = null,
 )
 
 data class LiveContent(
@@ -103,3 +105,19 @@ sealed interface LiveState {
 
 /** Favorites are saved per source, so two providers can't mix up channel ids. */
 fun favoriteKey(sourceId: String, channel: LiveChannel): String = "$sourceId:${channel.id}"
+
+// ---------- Search
+
+/** Every movie and series the source lists, for searching beyond what Home shows. */
+data class LibraryContent(
+    val movies: List<MediaItem>,
+    val series: List<MediaItem>,
+)
+
+/** One programme from the source's guide. Times are seconds since 1970. */
+data class GuideEntry(
+    val epgId: String,
+    val title: String,
+    val startSec: Long,
+    val endSec: Long,
+)

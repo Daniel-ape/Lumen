@@ -2,7 +2,7 @@ package com.yourname.lumen.data.home
 
 import com.yourname.lumen.core.diagnostics.AppLog
 import com.yourname.lumen.data.cache.LibraryCache
-import com.yourname.lumen.data.source.clientFor
+import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.data.xtream.describeFailure
 import com.yourname.lumen.domain.model.HomeState
 import com.yourname.lumen.domain.model.Source
@@ -19,10 +19,11 @@ import kotlinx.coroutines.withContext
  */
 suspend fun loadHomeState(
     source: Source?,
+    client: SourceClient?,
     cache: LibraryCache,
     onUpdate: (HomeState) -> Unit,
 ): HomeState {
-    if (source == null) return HomeState.NoSource
+    if (source == null || client == null) return HomeState.NoSource
 
     var shown = false
     val saved = withContext(Dispatchers.IO) { cache.loadHome(source.id) }
@@ -32,7 +33,7 @@ suspend fun loadHomeState(
     }
 
     return try {
-        val content = clientFor(source).loadHome { partial ->
+        val content = client.loadHome { partial ->
             onUpdate(HomeState.Ready(partial))
             shown = true
         }

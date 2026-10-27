@@ -2,7 +2,7 @@ package com.yourname.lumen.data.live
 
 import com.yourname.lumen.core.diagnostics.AppLog
 import com.yourname.lumen.data.cache.LibraryCache
-import com.yourname.lumen.data.source.clientFor
+import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.data.xtream.describeFailure
 import com.yourname.lumen.domain.model.LiveState
 import com.yourname.lumen.domain.model.Source
@@ -18,11 +18,12 @@ private const val FRESH_MINUTES = 10L
  */
 suspend fun loadLiveState(
     source: Source?,
+    client: SourceClient?,
     cache: LibraryCache,
     forceRefresh: Boolean,
     onUpdate: (LiveState) -> Unit,
 ): LiveState {
-    if (source == null) return LiveState.NoSource
+    if (source == null || client == null) return LiveState.NoSource
 
     val saved = withContext(Dispatchers.IO) { cache.loadLive(source.id) }
     if (saved != null && saved.first.channels.isNotEmpty()) {
@@ -32,7 +33,7 @@ suspend fun loadLiveState(
     }
 
     return try {
-        val content = clientFor(source).loadLive()
+        val content = client.loadLive()
         withContext(Dispatchers.IO) { runCatching { cache.saveLive(source.id, content) } }
         AppLog.add("Loaded ${content.channels.size} channels from ${source.name}")
         LiveState.Ready(content)

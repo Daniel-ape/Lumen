@@ -3,7 +3,9 @@ package com.yourname.lumen.data.source
 import com.yourname.lumen.data.m3u.M3uClient
 import com.yourname.lumen.data.xtream.XtreamClient
 import com.yourname.lumen.domain.model.ConnectionResult
+import com.yourname.lumen.domain.model.GuideEntry
 import com.yourname.lumen.domain.model.HomeContent
+import com.yourname.lumen.domain.model.LibraryContent
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveContent
 import com.yourname.lumen.domain.model.MediaDetails
@@ -23,6 +25,15 @@ interface SourceClient {
     suspend fun loadHome(onPartial: (HomeContent) -> Unit = {}): HomeContent
     suspend fun loadLive(): LiveContent
     suspend fun loadDetails(item: MediaItem): MediaDetails?
+
+    /** The whole movie and series list, for search. */
+    suspend fun loadLibrary(): LibraryContent
+
+    /**
+     * The programme guide for these channels over the coming day or so, or null when the source has
+     * no guide it can give us. Only channels the source gave a guide id are covered.
+     */
+    suspend fun loadGuide(channels: List<LiveChannel>, offsetSec: Long): List<GuideEntry>?
 
     /** Current and next programme. [offsetSec] shifts the times for sources whose clock is off. */
     suspend fun shortEpg(channel: LiveChannel, offsetSec: Long): NowNext

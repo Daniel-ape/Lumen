@@ -49,3 +49,19 @@ fun qualityClass(heightPx: Int): String? = when {
     heightPx >= 700 -> "HD"
     else -> null
 }
+
+/** "Today 21:30", "Tomorrow 09:00" or "Sat 20:00" for a time in the next days. */
+fun dayAndTime(sec: Long): String {
+    val target = java.util.Calendar.getInstance().apply { timeInMillis = sec * 1000 }
+    val today = java.util.Calendar.getInstance()
+    val tomorrow = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, 1) }
+    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
+        a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+            a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    val day = when {
+        sameDay(target, today) -> "Today"
+        sameDay(target, tomorrow) -> "Tomorrow"
+        else -> java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date(sec * 1000))
+    }
+    return "$day ${clockTime(sec)}"
+}

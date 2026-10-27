@@ -3,7 +3,9 @@ package com.yourname.lumen.data.m3u
 import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.data.xtream.describeFailure
 import com.yourname.lumen.domain.model.ConnectionResult
+import com.yourname.lumen.domain.model.GuideEntry
 import com.yourname.lumen.domain.model.HomeContent
+import com.yourname.lumen.domain.model.LibraryContent
 import com.yourname.lumen.domain.model.LiveCategory
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveContent
@@ -68,6 +70,11 @@ class M3uClient(private val source: Source) : SourceClient {
         HomeContent(emptyList(), emptyList(), emptyList())
 
     override suspend fun loadDetails(item: MediaItem): MediaDetails? = null
+
+    // Playlists have no movie or series library, and no programme guide.
+    override suspend fun loadLibrary(): LibraryContent = LibraryContent(emptyList(), emptyList())
+
+    override suspend fun loadGuide(channels: List<LiveChannel>, offsetSec: Long): List<GuideEntry>? = null
 
     // Playlists have no programme guide of their own.
     override suspend fun shortEpg(channel: LiveChannel, offsetSec: Long): NowNext = NowNext(null, null)

@@ -40,6 +40,9 @@ import com.yourname.lumen.core.diagnostics.AppLog
 import com.yourname.lumen.core.util.backdropRequest
 import com.yourname.lumen.data.cache.LibraryCache
 import com.yourname.lumen.data.epg.EpgCache
+import com.yourname.lumen.data.epg.GuideIndex
+import com.yourname.lumen.data.search.ProgrammeHit
+import com.yourname.lumen.data.search.SearchIndex
 import com.yourname.lumen.data.home.loadHomeState
 import com.yourname.lumen.data.live.loadLiveState
 import com.yourname.lumen.data.m3u.M3uClient
@@ -53,6 +56,7 @@ import com.yourname.lumen.data.xtream.validatePlaylistLink
 import com.yourname.lumen.data.xtream.validateServerUrl
 import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.HomeState
+import com.yourname.lumen.domain.model.LibraryContent
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveState
 import com.yourname.lumen.domain.model.MediaItem
@@ -70,6 +74,9 @@ import com.yourname.lumen.ui.navigation.Section
 import com.yourname.lumen.ui.player.FullscreenControls
 import com.yourname.lumen.ui.player.PlaybackController
 import com.yourname.lumen.ui.player.VideoLayer
+import com.yourname.lumen.ui.search.ProgrammeDetailsScreen
+import com.yourname.lumen.ui.search.SearchScreen
+import com.yourname.lumen.ui.search.SearchStatus
 import com.yourname.lumen.ui.settings.ConnectionFormScreen
 import com.yourname.lumen.ui.settings.SettingsActions
 import com.yourname.lumen.ui.settings.SettingsInfo
@@ -111,6 +118,14 @@ fun LumenApp(settings: AppSettings) {
     var imageCacheBytes by remember { mutableLongStateOf(0L) }
     var libraryCacheBytes by remember { mutableLongStateOf(0L) }
     var cacheVersion by remember { mutableIntStateOf(0) }
+
+    // Search: the whole movie and series list, the programme guide, and the index built from them.
+    var searchQuery by remember { mutableStateOf("") }
+    var library by remember { mutableStateOf<LibraryContent?>(null) }
+    var libraryFor by remember { mutableStateOf<String?>(null) }
+    var libraryLoading by remember { mutableStateOf(false) }
+    var searchIndex by remember { mutableStateOf<SearchIndex?>(null) }
+    var programmeDetails by remember { mutableStateOf<ProgrammeHit?>(null) }
 
     // Home's position is kept here, so leaving Home (details, other sections) and coming back
     // returns to the same scroll position, hero slide and row positions.
@@ -166,7 +181,7 @@ fun LumenApp(settings: AppSettings) {
     // The screen is only blanked when the source itself changed.
     LaunchedEffect(loadKey, retryKey) {
         if (homeState !is HomeState.Ready || homeFor != activeSource?.id) homeState = HomeState.Loading
-        val result = loadHomeState(activeSource, libraryCache) { homeState = it }
+        val result = loadHomeState(activeSource, client, libraryCache) { homeState = it }
         homeState = result
         homeFor = activeSource?.id
         if (result is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
@@ -182,11 +197,63 @@ fun LumenApp(settings: AppSettings) {
 
     // The channel list: first open uses the saved copy if it is fresh enough; a refresh asks again.
     LaunchedEffect(section, loadKey, retryKey) {
-        if (section == Section.LiveTv && liveKey != (loadKey to retryKey)) {
+        // Search needs the channel list too, so it loads the same way when Search is opened.
+        if ((section == Section.LiveTv || section == Section.Search) && liveKey != (loadKey to retryKey)) {
             val force = liveKey != null && liveKey?.second != retryKey
             if (liveState !is LiveState.Ready || liveKey?.first?.id != activeSource?.id) liveState = LiveState.Loading
-            liveState = loadLiveState(activeSource, libraryCache, force) { liveState = it }
+            liveState = loadLiveState(activeSource, client, libraryCache, force) { liveState = it }
             liveKey = loadKey to retryKey
+        }
+    }
+
+    // Search data, loaded only once Search is opened: the whole library (saved copy first, then a fresh one
+    // if it is missing or over a day old), then the programme guide once the channels are known.
+    LaunchedEffect(section, loadKey) {
+        val id = activeSource?.id
+        val current = client
+        if (section != Section.Search || id == null || current == null) return@LaunchedEffect
+        if (libraryFor != id) {
+            library = null
+            libraryFor = id
+        }
+        if (library != null) return@LaunchedEffect
+        libraryLoading = true
+        val saved = withContext(Dispatchers.IO) { libraryCache.loadLibrary(id) }
+        if (saved != null) library = saved.first
+        if (saved == null || saved.second > 24 * 60) {
+            try {
+                val fresh = current.loadLibrary()
+                library = fresh
+                withContext(Dispatchers.IO) { runCatching { libraryCache.saveLibrary(id, fresh) } }
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.add("Could not load the full library for search")
+            }
+        }
+        libraryLoading = false
+    }
+
+    val guideIndex = remember(client, settings.epgOffsetMinutes) { GuideIndex() }
+    val liveChannelsForSearch = (liveState as? LiveState.Ready)?.content?.channels
+    LaunchedEffect(section, liveChannelsForSearch, guideIndex) {
+        val current = client
+        val channels = liveChannelsForSearch
+        if (section == Section.Search && current != null && !channels.isNullOrEmpty()) {
+            guideIndex.ensureLoaded(current, channels, settings.epgOffsetMinutes * 60L)
+        }
+    }
+
+    // The index is rebuilt off the main thread whenever more data has arrived. Until the full library
+    // is in, the newest movies and series from Home are searchable straight away.
+    val homeFallback = (homeState as? HomeState.Ready)?.content?.let { LibraryContent(it.movies, it.series) }
+    LaunchedEffect(section, library, homeFallback, liveChannelsForSearch, guideIndex.entries) {
+        if (section != Section.Search) return@LaunchedEffect
+        val lib = library ?: homeFallback
+        val channels = liveChannelsForSearch.orEmpty()
+        val guide = guideIndex.entries
+        searchIndex = withContext(Dispatchers.Default) {
+            SearchIndex(lib?.movies.orEmpty(), lib?.series.orEmpty(), channels, guide)
         }
     }
 
@@ -225,9 +292,9 @@ fun LumenApp(settings: AppSettings) {
 
     // Put focus on the page once it has something to focus, without stealing it from the dock or the player.
     // (A pending "return to this poster" is left alone: Home puts focus there itself.)
-    LaunchedEffect(formType, detailsItem, homeState, liveState, section, fullscreen) {
+    LaunchedEffect(formType, detailsItem, programmeDetails, homeState, liveState, section, fullscreen) {
         val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
-        if (formType == null && detailsItem == null && !fullscreen && ready && !dockHasFocus && restoreItemId == null) {
+        if (formType == null && detailsItem == null && programmeDetails == null && !fullscreen && ready && !dockHasFocus && restoreItemId == null) {
             // If the page has nothing to focus yet, fall back to the dock so the remote is never dead.
             val ok = runCatching { contentFocus.requestFocus() }.isSuccess
             if (!ok) runCatching { dockFocus.requestFocus() }
@@ -241,7 +308,7 @@ fun LumenApp(settings: AppSettings) {
     val dockVisible = !fullscreen && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
 
     // Back from content brings the dock back and moves focus to it; Back on the dock leaves the app.
-    BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && !fullscreen) {
+    BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && programmeDetails == null && !fullscreen) {
         dockForced = true
     }
     LaunchedEffect(dockForced) {
@@ -262,6 +329,14 @@ fun LumenApp(settings: AppSettings) {
         }
         focusedChannelId = channel.id
         if (settings.rememberLastChannel) settings.updateLastChannel(channel.id)
+    }
+
+    /** Opens a channel from search: plays it fullscreen with the whole channel list for Up/Down. */
+    fun openChannelFromSearch(channel: LiveChannel) {
+        val all = (liveState as? LiveState.Ready)?.content?.channels ?: return
+        playChannel(channel)
+        fullscreenChannels = all
+        fullscreen = true
     }
 
     fun testSource(source: Source) {
@@ -373,6 +448,17 @@ fun LumenApp(settings: AppSettings) {
                         editingSource = null
                     },
                     onSubmit = { values, save -> submitConnection(type, values, save) },
+                )
+            }
+
+            programmeDetails != null -> programmeDetails?.let { hit ->
+                ProgrammeDetailsScreen(
+                    hit = hit,
+                    onOpenChannel = {
+                        programmeDetails = null
+                        openChannelFromSearch(hit.channel)
+                    },
+                    onBack = { programmeDetails = null },
                 )
             }
 
@@ -503,6 +589,30 @@ fun LumenApp(settings: AppSettings) {
                                 },
                                 onRestart = { restartApp(context) },
                             ),
+                            dockFocus = dockFocus,
+                            contentFocus = contentFocus,
+                        )
+
+                        Section.Search -> SearchScreen(
+                            query = searchQuery,
+                            onQueryChange = { searchQuery = it },
+                            index = searchIndex,
+                            status = SearchStatus(
+                                loadingLibrary = libraryLoading,
+                                loadingChannels = liveState is LiveState.Loading && activeSource != null,
+                                guidePhase = guideIndex.phase,
+                                guideMessage = guideIndex.message,
+                            ),
+                            epg = epg,
+                            showRatings = settings.showRatings,
+                            onOpenItem = {
+                                restoreItemId = null
+                                detailsItem = it
+                            },
+                            onPlayChannel = { openChannelFromSearch(it) },
+                            onOpenProgramme = { hit ->
+                                if (hit.isNow) openChannelFromSearch(hit.channel) else programmeDetails = hit
+                            },
                             dockFocus = dockFocus,
                             contentFocus = contentFocus,
                         )

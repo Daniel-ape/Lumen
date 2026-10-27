@@ -3,6 +3,9 @@ package com.yourname.lumen.data.xtream
 import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.domain.model.ConnectionResult
 import android.util.Base64
+import android.util.Xml
+import com.yourname.lumen.domain.model.GuideEntry
+import com.yourname.lumen.domain.model.LibraryContent
 import com.yourname.lumen.domain.model.HomeContent
 import com.yourname.lumen.domain.model.LiveCategory
 import com.yourname.lumen.domain.model.LiveChannel
@@ -27,10 +30,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
 
 /**
  * Talks to an Xtream Codes compatible server. Self-hosted panels that speak the same API work too.
@@ -207,6 +213,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                     name = name,
                     logoUrl = o.str("stream_icon"),
                     categoryId = o.optString("category_id"),
+                    epgId = o.str("epg_channel_id"),
                 ),
             )
         }
@@ -257,53 +264,140 @@ class XtreamClient(private val source: Source) : SourceClient {
     override fun streamUrl(channel: LiveChannel, extension: String): String =
         "$base/live/${enc(source.username)}/${enc(source.password)}/${channel.id}.$extension"
 
-    private suspend fun newestMovies(): List<MediaItem> = withContext(Dispatchers.Default) {
-        val arr = JSONArray(fetch(url("get_vod_streams")))
-        val raw = ArrayList<JSONObject>()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            if (o.str("stream_icon") != null) raw.add(o)
-        }
-        raw.sortedByDescending { it.optString("added").toLongOrNull() ?: 0L }
-            .take(30)
-            .map { o ->
-                val name = o.optString("name")
-                MediaItem(
-                    id = o.optString("stream_id"),
-                    type = MediaType.Movie,
-                    title = cleanTitle(name),
-                    year = yearOf(name, o.optString("year")),
-                    rating = ratingOf(o.optString("rating")),
-                    plot = null,
-                    posterUrl = o.str("stream_icon"),
-                    backdropUrl = null,
-                )
+    private var moviesAll: List<MediaItem>? = null
+    private var seriesAll: List<MediaItem>? = null
+    private val moviesLock = Mutex()
+    private val seriesLock = Mutex()
+
+    /** Every movie, newest first. Fetched once per connection and kept, so Home and search share it. */
+    private suspend fun allMovies(): List<MediaItem> = moviesLock.withLock {
+        moviesAll ?: withContext(Dispatchers.Default) {
+            val arr = JSONArray(fetch(url("get_vod_streams")))
+            val raw = ArrayList<JSONObject>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optString("stream_id").isNotBlank()) raw.add(o)
             }
+            raw.sortedByDescending { it.optString("added").toLongOrNull() ?: 0L }
+                .map { o ->
+                    val name = o.optString("name")
+                    MediaItem(
+                        id = o.optString("stream_id"),
+                        type = MediaType.Movie,
+                        title = cleanTitle(name),
+                        year = yearOf(name, o.optString("year")),
+                        rating = ratingOf(o.optString("rating")),
+                        plot = null,
+                        posterUrl = o.str("stream_icon"),
+                        backdropUrl = null,
+                    )
+                }
+        }.also { moviesAll = it }
     }
 
-    private suspend fun newestSeries(): List<MediaItem> = withContext(Dispatchers.Default) {
-        val arr = JSONArray(fetch(url("get_series")))
-        val raw = ArrayList<JSONObject>()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            if (o.str("cover") != null) raw.add(o)
-        }
-        raw.sortedByDescending { it.optString("last_modified").toLongOrNull() ?: 0L }
-            .take(30)
-            .map { o ->
-                val name = o.optString("name")
-                MediaItem(
-                    id = o.optString("series_id"),
-                    type = MediaType.Series,
-                    title = cleanTitle(name),
-                    year = o.str("year") ?: yearOf(name, ""),
-                    rating = ratingOf(o.optString("rating")),
-                    plot = o.str("plot"),
-                    posterUrl = o.str("cover"),
-                    backdropUrl = o.firstOf("backdrop_path")?.let { upgradeImage(it) },
-                )
+    /** Every series, newest first. See [allMovies]. */
+    private suspend fun allSeries(): List<MediaItem> = seriesLock.withLock {
+        seriesAll ?: withContext(Dispatchers.Default) {
+            val arr = JSONArray(fetch(url("get_series")))
+            val raw = ArrayList<JSONObject>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optString("series_id").isNotBlank()) raw.add(o)
             }
+            raw.sortedByDescending { it.optString("last_modified").toLongOrNull() ?: 0L }
+                .map { o ->
+                    val name = o.optString("name")
+                    MediaItem(
+                        id = o.optString("series_id"),
+                        type = MediaType.Series,
+                        title = cleanTitle(name),
+                        year = o.str("year") ?: yearOf(name, ""),
+                        rating = ratingOf(o.optString("rating")),
+                        plot = o.str("plot"),
+                        posterUrl = o.str("cover"),
+                        backdropUrl = o.firstOf("backdrop_path")?.let { upgradeImage(it) },
+                    )
+                }
+        }.also { seriesAll = it }
     }
+
+    // Home only features titles that have a picture.
+    private suspend fun newestMovies(): List<MediaItem> = allMovies().filter { it.posterUrl != null }.take(30)
+
+    private suspend fun newestSeries(): List<MediaItem> = allSeries().filter { it.posterUrl != null }.take(30)
+
+    override suspend fun loadLibrary(): LibraryContent = coroutineScope {
+        val movies = async { allMovies() }
+        val series = async { allSeries() }
+        LibraryContent(movies = movies.await(), series = series.await())
+    }
+
+    /**
+     * The programme guide from the server's XMLTV file, kept to the channels we know and to roughly
+     * the next day and a half. Read as a stream, so a large file never sits in memory whole.
+     * Returns null when the server has no usable guide file.
+     */
+    override suspend fun loadGuide(channels: List<LiveChannel>, offsetSec: Long): List<GuideEntry>? =
+        withContext(Dispatchers.IO) {
+            val wanted = channels.mapNotNull { it.epgId?.lowercase() }.toHashSet()
+            if (wanted.isEmpty()) return@withContext null
+            val nowSec = System.currentTimeMillis() / 1000
+            val from = nowSec - 3600
+            val to = nowSec + 36 * 3600
+            val zoned = java.text.SimpleDateFormat("yyyyMMddHHmmss Z", java.util.Locale.US)
+            val plain = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            fun timeOf(raw: String?): Long? {
+                val text = raw?.trim() ?: return null
+                return runCatching { zoned.parse(text)?.time }.getOrNull()?.div(1000)
+                    ?: runCatching { plain.parse(text.take(14))?.time }.getOrNull()?.div(1000)
+            }
+
+            val conn = URL("$base/xmltv.php?username=${enc(source.username)}&password=${enc(source.password)}")
+                .openConnection() as HttpURLConnection
+            try {
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 120_000
+                conn.setRequestProperty("User-Agent", "Lumen/0.1")
+                if (conn.responseCode !in 200..299) return@withContext null
+                val out = ArrayList<GuideEntry>()
+                conn.inputStream.buffered().use { input ->
+                    val parser = Xml.newPullParser()
+                    parser.setInput(input, null)
+                    var event = parser.eventType
+                    while (event != XmlPullParser.END_DOCUMENT && out.size < 400_000) {
+                        if (event == XmlPullParser.START_TAG && parser.name == "programme") {
+                            val channel = parser.getAttributeValue(null, "channel")?.lowercase()
+                            val start = timeOf(parser.getAttributeValue(null, "start"))
+                            val stop = timeOf(parser.getAttributeValue(null, "stop"))
+                            var title: String? = null
+                            var depth = 1
+                            while (depth > 0) {
+                                event = parser.next()
+                                if (event == XmlPullParser.START_TAG) {
+                                    if (parser.name == "title" && title == null) title = parser.nextText().trim() else depth++
+                                } else if (event == XmlPullParser.END_TAG) {
+                                    depth--
+                                } else if (event == XmlPullParser.END_DOCUMENT) {
+                                    break
+                                }
+                            }
+                            if (channel != null && channel in wanted && start != null && stop != null &&
+                                stop > from && start < to && !title.isNullOrBlank()
+                            ) {
+                                out.add(GuideEntry(channel, title, start + offsetSec, stop + offsetSec))
+                            }
+                        }
+                        if (event == XmlPullParser.END_DOCUMENT) break
+                        event = parser.next()
+                    }
+                }
+                out
+            } finally {
+                conn.disconnect()
+            }
+        }
 
     private suspend fun withDetails(item: MediaItem): MediaItem = try {
         val info = JSONObject(fetch(url("get_vod_info", "vod_id" to item.id))).optJSONObject("info")

@@ -57,6 +57,7 @@ import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.data.settings.AppSettings
 import com.yourname.lumen.domain.model.Source
 import com.yourname.lumen.domain.model.SourceType
+import kotlinx.coroutines.delay
 
 /** Things the settings screens ask the app to do. */
 class SettingsActions(
@@ -130,6 +131,18 @@ fun SettingsScreen(
     val focusManager = LocalFocusManager.current
 
     val pending = settings.hasPendingAppearanceChanges
+
+    // When a question closes, focus goes back to the category list instead of being lost.
+    var dialogWasShown by remember { mutableStateOf(false) }
+    LaunchedEffect(confirm) {
+        if (confirm != null) {
+            dialogWasShown = true
+        } else if (dialogWasShown) {
+            dialogWasShown = false
+            delay(80)
+            runCatching { sidebarFocus[selected.ordinal].requestFocus() }
+        }
+    }
 
     // When a question closes its dialog is removed, so put focus back on the open category.
     var dialogWasOpen by remember { mutableStateOf(false) }

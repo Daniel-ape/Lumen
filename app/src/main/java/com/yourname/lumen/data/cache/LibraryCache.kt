@@ -49,7 +49,8 @@ class LibraryCache(private val dir: File) {
                     .put("name", it.name)
                     .put("logo", it.logoUrl ?: "")
                     .put("cat", it.categoryId)
-                    .put("url", it.streamUrl ?: ""),
+                    .put("url", it.streamUrl ?: "")
+                    .put("epg", it.epgId ?: ""),
             )
         }
         write(file("live", sourceId), JSONObject().put("categories", categories).put("channels", channels).toString())
@@ -75,11 +76,30 @@ class LibraryCache(private val dir: File) {
                         logoUrl = it.optString("logo").takeIf { s -> s.isNotEmpty() },
                         categoryId = it.optString("cat"),
                         streamUrl = it.optString("url").takeIf { s -> s.isNotEmpty() },
+                        epgId = it.optString("epg").takeIf { s -> s.isNotEmpty() },
                     )
                 }
             },
         )
         content to ((System.currentTimeMillis() - target.lastModified()) / 60_000L)
+    }.getOrNull()
+
+    fun saveLibrary(sourceId: String, content: com.yourname.lumen.domain.model.LibraryContent) {
+        val json = JSONObject()
+            .put("movies", itemsToJson(content.movies))
+            .put("series", itemsToJson(content.series))
+        write(file("library", sourceId), json.toString())
+    }
+
+    /** The saved movie and series list, and how many minutes old it is, or null if there is none. */
+    fun loadLibrary(sourceId: String): Pair<com.yourname.lumen.domain.model.LibraryContent, Long>? = runCatching {
+        val target = file("library", sourceId)
+        val text = read(target) ?: return null
+        val json = JSONObject(text)
+        com.yourname.lumen.domain.model.LibraryContent(
+            movies = itemsFromJson(json.optJSONArray("movies")),
+            series = itemsFromJson(json.optJSONArray("series")),
+        ) to ((System.currentTimeMillis() - target.lastModified()) / 60_000L)
     }.getOrNull()
 
     fun sizeBytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
