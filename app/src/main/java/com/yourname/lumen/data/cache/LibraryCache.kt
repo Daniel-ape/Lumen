@@ -141,8 +141,7 @@ class LibraryCache(private val dir: File) {
                     .put("rating", it.rating ?: "")
                     .put("plot", it.plot ?: "")
                     .put("poster", it.posterUrl ?: "")
-                    .put("backdrop", it.backdropUrl ?: "")
-                    .put("cat", it.categoryId ?: ""),
+                    .put("backdrop", it.backdropUrl ?: ""),
             )
         }
         return arr
@@ -161,7 +160,6 @@ class LibraryCache(private val dir: File) {
                 plot = o.optString("plot").takeIf { it.isNotEmpty() },
                 posterUrl = o.optString("poster").takeIf { it.isNotEmpty() },
                 backdropUrl = o.optString("backdrop").takeIf { it.isNotEmpty() },
-                categoryId = o.optString("cat").takeIf { it.isNotEmpty() },
             )
         }
     }

@@ -98,18 +98,9 @@ class AppSettings(context: Context) {
     var autoRefreshHours by mutableIntStateOf(prefs.getInt(KEY_REFRESH, 0))
         private set
 
-    /** When on, moving across the top menu opens each page straight away; when off, OK opens it. */
-    var dockSwitchOnFocus by mutableStateOf(prefs.getBoolean(KEY_DOCK_FOCUS, true))
-        private set
-
     fun updateStartSection(value: Int) {
         startSection = value
         prefs.edit().putInt(KEY_START_SECTION, value).apply()
-    }
-
-    fun updateDockSwitchOnFocus(value: Boolean) {
-        dockSwitchOnFocus = value
-        prefs.edit().putBoolean(KEY_DOCK_FOCUS, value).apply()
     }
 
     fun updateConfirmDestructive(value: Boolean) {
@@ -253,7 +244,6 @@ class AppSettings(context: Context) {
         updateHeroAutoRotate(true)
         updateStartSection(0)
         updateConfirmDestructive(true)
-        updateDockSwitchOnFocus(true)
         updateAutoRefreshHours(0)
         updatePreferTs(false)
         updatePreviewSound(true)
@@ -279,7 +269,6 @@ class AppSettings(context: Context) {
         const val KEY_ROTATE = "hero_auto_rotate"
         const val KEY_START_SECTION = "start_section"
         const val KEY_CONFIRM = "confirm_destructive"
-        const val KEY_DOCK_FOCUS = "dock_switch_on_focus"
         const val KEY_REFRESH = "auto_refresh_hours"
         const val KEY_PREFER_TS = "prefer_ts"
         const val KEY_PREVIEW_SOUND = "preview_sound"

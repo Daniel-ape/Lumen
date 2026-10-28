@@ -122,7 +122,7 @@ fun HomeScreen(
                 HomeState.Loading -> item {
                     HeroMessage(
                         title = "Loading…",
-                        message = "Getting what's new from your source. The first time can take a moment.",
+                        message = "Getting what's new from your source.",
                         primaryLabel = null,
                         onPrimary = {},
                         contentFocus = contentFocus,

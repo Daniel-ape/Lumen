@@ -278,14 +278,12 @@ class XtreamClient(private val source: Source) : SourceClient {
     private suspend fun <T> streamList(
         url: String,
         wanted: Set<String>,
-        limit: Int = Int.MAX_VALUE,
-        readTimeoutMs: Int = 40_000,
         build: (Map<String, String>) -> T?,
     ): List<T> = withContext(Dispatchers.IO) {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 10_000
-            conn.readTimeout = readTimeoutMs
+            conn.readTimeout = 40_000
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("User-Agent", "Lumen/0.1")
             if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
@@ -294,8 +292,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                 // An empty or error reply isn't a list; treat it as no entries.
                 if (reader.peek() != JsonToken.BEGIN_ARRAY) return@use out
                 reader.beginArray()
-                // With a limit, reading stops as soon as enough entries are in; the rest is never downloaded.
-                while (reader.hasNext() && out.size < limit) {
+                while (reader.hasNext()) {
                     if (reader.peek() != JsonToken.BEGIN_OBJECT) {
                         reader.skipValue()
                         continue
@@ -309,7 +306,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                     reader.endObject()
                     build(fields)?.let { out.add(it) }
                 }
-                if (!reader.hasNext()) reader.endArray()
+                reader.endArray()
                 out
             }
         } finally {
@@ -340,120 +337,54 @@ class XtreamClient(private val source: Source) : SourceClient {
         }
     }
 
-    private val movieFields = setOf("stream_id", "name", "year", "rating", "stream_icon", "added", "category_id")
-    private val seriesFields = setOf("series_id", "name", "year", "rating", "plot", "cover", "backdrop_path", "last_modified", "category_id")
+    private val movieFields = setOf("stream_id", "name", "year", "rating", "stream_icon", "added")
+    private val seriesFields = setOf("series_id", "name", "year", "rating", "plot", "cover", "backdrop_path", "last_modified")
     private val channelFields = setOf("stream_id", "name", "num", "stream_icon", "category_id", "epg_channel_id")
 
-    private fun movieFrom(f: Map<String, String>): Pair<Long, MediaItem>? {
-        val id = f.str("stream_id") ?: return null
-        val name = f["name"].orEmpty()
-        return (f["added"]?.toLongOrNull() ?: 0L) to MediaItem(
-            id = id,
-            type = MediaType.Movie,
-            title = cleanTitle(name),
-            year = yearOf(name, f["year"].orEmpty()),
-            rating = ratingOf(f["rating"].orEmpty()),
-            plot = null,
-            posterUrl = f.str("stream_icon"),
-            backdropUrl = null,
-            categoryId = f.str("category_id"),
-        )
-    }
-
-    private fun seriesFrom(f: Map<String, String>): Pair<Long, MediaItem>? {
-        val id = f.str("series_id") ?: return null
-        val name = f["name"].orEmpty()
-        return (f["last_modified"]?.toLongOrNull() ?: 0L) to MediaItem(
-            id = id,
-            type = MediaType.Series,
-            title = cleanTitle(name),
-            year = f.str("year") ?: yearOf(name, ""),
-            rating = ratingOf(f["rating"].orEmpty()),
-            plot = f.str("plot"),
-            posterUrl = f.str("cover"),
-            backdropUrl = f.str("backdrop_path")?.let { upgradeImage(it) },
-            categoryId = f.str("category_id"),
-        )
-    }
-
-    /** Movies from the whole list, or from one category (a much smaller request), stopping after [limit]. */
-    private suspend fun movieEntries(categoryId: String?, limit: Int, timeoutMs: Int): List<Pair<Long, MediaItem>> {
-        val params: Array<Pair<String, String>> =
-            if (categoryId != null) arrayOf("category_id" to categoryId) else emptyArray()
-        return streamList(url("get_vod_streams", *params), movieFields, limit, timeoutMs, ::movieFrom)
-    }
-
-    private suspend fun seriesEntries(categoryId: String?, limit: Int, timeoutMs: Int): List<Pair<Long, MediaItem>> {
-        val params: Array<Pair<String, String>> =
-            if (categoryId != null) arrayOf("category_id" to categoryId) else emptyArray()
-        return streamList(url("get_series", *params), seriesFields, limit, timeoutMs, ::seriesFrom)
-    }
-
-    /** Every movie, newest first. Fetched once per connection and kept; this is the slow, complete list. */
+    /** Every movie, newest first. Fetched once per connection and kept, so Home and search share it. */
     private suspend fun allMovies(): List<MediaItem> = moviesLock.withLock {
         moviesAll ?: withContext(Dispatchers.IO) {
-            movieEntries(null, Int.MAX_VALUE, 120_000).sortedByDescending { it.first }.map { it.second }
+            streamList(url("get_vod_streams"), movieFields) { f ->
+                val id = f.str("stream_id") ?: return@streamList null
+                val name = f["name"].orEmpty()
+                (f["added"]?.toLongOrNull() ?: 0L) to MediaItem(
+                    id = id,
+                    type = MediaType.Movie,
+                    title = cleanTitle(name),
+                    year = yearOf(name, f["year"].orEmpty()),
+                    rating = ratingOf(f["rating"].orEmpty()),
+                    plot = null,
+                    posterUrl = f.str("stream_icon"),
+                    backdropUrl = null,
+                )
+            }.sortedByDescending { it.first }.map { it.second }
         }.also { moviesAll = it }
     }
 
     /** Every series, newest first. See [allMovies]. */
     private suspend fun allSeries(): List<MediaItem> = seriesLock.withLock {
         seriesAll ?: withContext(Dispatchers.IO) {
-            seriesEntries(null, Int.MAX_VALUE, 120_000).sortedByDescending { it.first }.map { it.second }
+            streamList(url("get_series"), seriesFields) { f ->
+                val id = f.str("series_id") ?: return@streamList null
+                val name = f["name"].orEmpty()
+                (f["last_modified"]?.toLongOrNull() ?: 0L) to MediaItem(
+                    id = id,
+                    type = MediaType.Series,
+                    title = cleanTitle(name),
+                    year = f.str("year") ?: yearOf(name, ""),
+                    rating = ratingOf(f["rating"].orEmpty()),
+                    plot = f.str("plot"),
+                    posterUrl = f.str("cover"),
+                    backdropUrl = f.str("backdrop_path")?.let { upgradeImage(it) },
+                )
+            }.sortedByDescending { it.first }.map { it.second }
         }.also { seriesAll = it }
     }
 
-    private val preferredWords = Regex("new|recent|latest|trending|popular|202\\d", RegexOption.IGNORE_CASE)
-    private val skippedWords = Regex("adult|xxx|18\\+|porn", RegexOption.IGNORE_CASE)
-
-    /** Up to three categories to sample for Home: ones that sound current first, adult ones never. */
-    private fun pickCategories(all: List<LiveCategory>): List<LiveCategory> {
-        val usable = all.filterNot { skippedWords.containsMatchIn(it.name) }
-        val preferred = usable.filter { preferredWords.containsMatchIn(it.name) }
-        return (preferred + usable).distinctBy { it.id }.take(3)
-    }
-
-    /**
-     * A small, quick sample for Home. It asks for a few small categories instead of the whole library,
-     * so Home appears in seconds even when the full list holds tens of thousands of titles. (Servers
-     * often take a long time just to start answering for the full list.) The full list loads later,
-     * in the background, for the Movies, Series and Search screens.
-     */
-    private suspend fun quickMovies(): List<MediaItem> = coroutineScope {
-        val picked = pickCategories(runCatching { loadCategories(MediaType.Movie) }.getOrDefault(emptyList()))
-        val parts = if (picked.isEmpty()) {
-            listOf(async { movieEntries(null, 150, 25_000) })
-        } else {
-            picked.map { c -> async { runCatching { movieEntries(c.id, 80, 25_000) }.getOrDefault(emptyList()) } }
-        }
-        parts.awaitAll().flatten().distinctBy { it.second.id }.sortedByDescending { it.first }.map { it.second }
-    }
-
-    private suspend fun quickSeries(): List<MediaItem> = coroutineScope {
-        val picked = pickCategories(runCatching { loadCategories(MediaType.Series) }.getOrDefault(emptyList()))
-        val parts = if (picked.isEmpty()) {
-            listOf(async { seriesEntries(null, 150, 25_000) })
-        } else {
-            picked.map { c -> async { runCatching { seriesEntries(c.id, 80, 25_000) }.getOrDefault(emptyList()) } }
-        }
-        parts.awaitAll().flatten().distinctBy { it.second.id }.sortedByDescending { it.first }.map { it.second }
-    }
-
     // Home only features titles that have a picture.
-    private suspend fun newestMovies(): List<MediaItem> = quickMovies().filter { it.posterUrl != null }.take(30)
+    private suspend fun newestMovies(): List<MediaItem> = allMovies().filter { it.posterUrl != null }.take(30)
 
-    private suspend fun newestSeries(): List<MediaItem> = quickSeries().filter { it.posterUrl != null }.take(30)
-
-    override suspend fun loadCategories(type: MediaType): List<LiveCategory> = withContext(Dispatchers.Default) {
-        val action = if (type == MediaType.Movie) "get_vod_categories" else "get_series_categories"
-        val arr = JSONArray(fetch(url(action)))
-        (0 until arr.length()).mapNotNull { i ->
-            val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            val id = o.optString("category_id")
-            val name = o.optString("category_name").trim()
-            if (id.isBlank() || name.isEmpty()) null else LiveCategory(id, name)
-        }
-    }
+    private suspend fun newestSeries(): List<MediaItem> = allSeries().filter { it.posterUrl != null }.take(30)
 
     override suspend fun loadLibrary(): LibraryContent = coroutineScope {
         val movies = async { allMovies() }
