@@ -6,6 +6,8 @@ import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.GuideEntry
 import com.yourname.lumen.domain.model.HomeContent
 import com.yourname.lumen.domain.model.LibraryContent
+import com.yourname.lumen.domain.model.LiveCategory
+import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveContent
 import com.yourname.lumen.domain.model.MediaDetails
@@ -25,6 +27,9 @@ interface SourceClient {
     suspend fun loadHome(onPartial: (HomeContent) -> Unit = {}): HomeContent
     suspend fun loadLive(): LiveContent
     suspend fun loadDetails(item: MediaItem): MediaDetails?
+
+    /** The source's categories for movies or series. */
+    suspend fun loadCategories(type: MediaType): List<LiveCategory>
 
     /** The whole movie and series list, for search. */
     suspend fun loadLibrary(): LibraryContent

@@ -28,6 +28,8 @@ data class MediaItem(
     val plot: String?,
     val posterUrl: String?,
     val backdropUrl: String?,
+    /** The source's category for this title, used by the Movies and Series screens. */
+    val categoryId: String? = null,
 )
 
 /** Everything the details page can show. Fields are null when the source doesn't provide them. */

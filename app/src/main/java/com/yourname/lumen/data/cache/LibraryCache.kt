@@ -37,6 +37,12 @@ class LibraryCache(private val dir: File) {
         )
     }.getOrNull()
 
+    /** How many minutes ago the saved Home copy was written, or null if there is none. */
+    fun homeAgeMinutes(sourceId: String): Long? {
+        val target = file("home", sourceId)
+        return if (target.exists()) (System.currentTimeMillis() - target.lastModified()) / 60_000L else null
+    }
+
     fun saveLive(sourceId: String, content: LiveContent) {
         val categories = JSONArray()
         content.categories.forEach { categories.put(JSONObject().put("id", it.id).put("name", it.name)) }
@@ -135,7 +141,8 @@ class LibraryCache(private val dir: File) {
                     .put("rating", it.rating ?: "")
                     .put("plot", it.plot ?: "")
                     .put("poster", it.posterUrl ?: "")
-                    .put("backdrop", it.backdropUrl ?: ""),
+                    .put("backdrop", it.backdropUrl ?: "")
+                    .put("cat", it.categoryId ?: ""),
             )
         }
         return arr
@@ -154,6 +161,7 @@ class LibraryCache(private val dir: File) {
                 plot = o.optString("plot").takeIf { it.isNotEmpty() },
                 posterUrl = o.optString("poster").takeIf { it.isNotEmpty() },
                 backdropUrl = o.optString("backdrop").takeIf { it.isNotEmpty() },
+                categoryId = o.optString("cat").takeIf { it.isNotEmpty() },
             )
         }
     }

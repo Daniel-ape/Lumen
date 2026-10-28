@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -57,6 +58,8 @@ import com.yourname.lumen.data.xtream.validateServerUrl
 import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.HomeState
 import com.yourname.lumen.domain.model.LibraryContent
+import com.yourname.lumen.domain.model.LiveCategory
+import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveState
 import com.yourname.lumen.domain.model.MediaItem
@@ -67,6 +70,7 @@ import com.yourname.lumen.ui.boot.BootScreen
 import com.yourname.lumen.ui.common.PlaceholderScreen
 import com.yourname.lumen.ui.details.DetailsScreen
 import com.yourname.lumen.ui.home.HomeScreen
+import com.yourname.lumen.ui.library.LibraryScreen
 import com.yourname.lumen.ui.live.LiveTvScreen
 import com.yourname.lumen.ui.navigation.DockSlot
 import com.yourname.lumen.ui.navigation.LumenDock
@@ -127,6 +131,17 @@ fun LumenApp(settings: AppSettings) {
     var searchIndex by remember { mutableStateOf<SearchIndex?>(null) }
     var programmeDetails by remember { mutableStateOf<ProgrammeHit?>(null) }
 
+    // Movies and Series screens: their categories, and where you were (category, sort, scroll).
+    var movieCategories by remember { mutableStateOf<List<LiveCategory>>(emptyList()) }
+    var seriesCategories by remember { mutableStateOf<List<LiveCategory>>(emptyList()) }
+    var categoriesFor by remember { mutableStateOf<String?>(null) }
+    val movieGrid = rememberLazyGridState()
+    val seriesGrid = rememberLazyGridState()
+    var movieCategory by remember { mutableIntStateOf(0) }
+    var seriesCategory by remember { mutableIntStateOf(0) }
+    var movieSort by remember { mutableIntStateOf(0) }
+    var seriesSort by remember { mutableIntStateOf(0) }
+
     // Home's position is kept here, so leaving Home (details, other sections) and coming back
     // returns to the same scroll position, hero slide and row positions.
     val homeListState = rememberLazyListState()
@@ -181,7 +196,7 @@ fun LumenApp(settings: AppSettings) {
     // The screen is only blanked when the source itself changed.
     LaunchedEffect(loadKey, retryKey) {
         if (homeState !is HomeState.Ready || homeFor != activeSource?.id) homeState = HomeState.Loading
-        val result = loadHomeState(activeSource, client, libraryCache) { homeState = it }
+        val result = loadHomeState(activeSource, client, libraryCache, retryKey > 0) { homeState = it }
         homeState = result
         homeFor = activeSource?.id
         if (result is HomeState.Ready) lastRefreshAt = System.currentTimeMillis()
@@ -196,9 +211,13 @@ fun LumenApp(settings: AppSettings) {
     }
 
     // The channel list: first open uses the saved copy if it is fresh enough; a refresh asks again.
-    LaunchedEffect(section, loadKey, retryKey) {
-        // Search needs the channel list too, so it loads the same way when Search is opened.
-        if ((section == Section.LiveTv || section == Section.Search) && liveKey != (loadKey to retryKey)) {
+    LaunchedEffect(section, loadKey, retryKey, homeFor) {
+        // Search needs the channel list too. Once Home is on screen the list is also fetched quietly in the
+        // background, so Live TV opens with its channels already there.
+        val wanted = section == Section.LiveTv || section == Section.Search
+        val background = !wanted && homeFor != null && homeFor == activeSource?.id
+        if ((wanted || background) && liveKey != (loadKey to retryKey)) {
+            if (background) delay(600)
             val force = liveKey != null && liveKey?.second != retryKey
             if (liveState !is LiveState.Ready || liveKey?.first?.id != activeSource?.id) liveState = LiveState.Loading
             liveState = loadLiveState(activeSource, client, libraryCache, force) { liveState = it }
@@ -211,7 +230,8 @@ fun LumenApp(settings: AppSettings) {
     LaunchedEffect(section, loadKey) {
         val id = activeSource?.id
         val current = client
-        if (section != Section.Search || id == null || current == null) return@LaunchedEffect
+        val needsLibrary = section == Section.Search || section == Section.Movies || section == Section.Series
+        if (!needsLibrary || id == null || current == null) return@LaunchedEffect
         if (libraryFor != id) {
             library = null
             libraryFor = id
@@ -220,7 +240,9 @@ fun LumenApp(settings: AppSettings) {
         libraryLoading = true
         val saved = withContext(Dispatchers.IO) { libraryCache.loadLibrary(id) }
         if (saved != null) library = saved.first
-        if (saved == null || saved.second > 24 * 60) {
+        // A copy saved before categories existed has none; it is replaced with a fresh one.
+        val hasCategories = saved != null && (saved.first.movies.any { it.categoryId != null } || saved.first.series.any { it.categoryId != null })
+        if (saved == null || saved.second > 24 * 60 || !hasCategories) {
             try {
                 val fresh = current.loadLibrary()
                 library = fresh
@@ -232,6 +254,34 @@ fun LumenApp(settings: AppSettings) {
             }
         }
         libraryLoading = false
+    }
+
+    LaunchedEffect(section, loadKey) {
+        val id = activeSource?.id
+        val current = client
+        if ((section == Section.Movies || section == Section.Series) && id != null && current != null && categoriesFor != id) {
+            try {
+                movieCategories = current.loadCategories(MediaType.Movie)
+                seriesCategories = current.loadCategories(MediaType.Series)
+                categoriesFor = id
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.add("Could not load movie and series categories")
+            }
+        }
+    }
+
+    // If a "return to this poster" never finds its poster (for example the list changed), give up after a
+    // moment and put focus back on the page, so the remote never ends up with nothing selected.
+    LaunchedEffect(restoreItemId) {
+        if (restoreItemId != null) {
+            delay(1_500)
+            if (restoreItemId != null) {
+                restoreItemId = null
+                runCatching { contentFocus.requestFocus() }
+            }
+        }
     }
 
     val guideIndex = remember(client, settings.epgOffsetMinutes) { GuideIndex() }
@@ -616,6 +666,37 @@ fun LumenApp(settings: AppSettings) {
                             dockFocus = dockFocus,
                             contentFocus = contentFocus,
                         )
+
+                        Section.Movies, Section.Series -> {
+                            val isMovies = current == Section.Movies
+                            val lib = library ?: homeFallback
+                            LibraryScreen(
+                                kind = if (isMovies) MediaType.Movie else MediaType.Series,
+                                items = (if (isMovies) lib?.movies else lib?.series).orEmpty(),
+                                categories = if (isMovies) movieCategories else seriesCategories,
+                                loading = libraryLoading,
+                                hasSource = activeSource != null,
+                                sourceHasLibrary = activeSource?.type != SourceType.M3U,
+                                showRatings = settings.showRatings,
+                                gridState = if (isMovies) movieGrid else seriesGrid,
+                                categoryIndex = if (isMovies) movieCategory else seriesCategory,
+                                onCategoryIndex = { if (isMovies) movieCategory = it else seriesCategory = it },
+                                sortMode = if (isMovies) movieSort else seriesSort,
+                                onSortMode = { if (isMovies) movieSort = it else seriesSort = it },
+                                restoreItemId = restoreItemId,
+                                onRestored = { restoreItemId = null },
+                                onOpen = {
+                                    restoreItemId = it.id
+                                    detailsItem = it
+                                },
+                                onAddSource = {
+                                    editingSource = null
+                                    formType = SourceType.XTREAM
+                                },
+                                dockFocus = dockFocus,
+                                contentFocus = contentFocus,
+                            )
+                        }
 
                         else -> PlaceholderScreen(current)
                     }

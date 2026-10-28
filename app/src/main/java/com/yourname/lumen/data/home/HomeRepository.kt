@@ -10,6 +10,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val FRESH_MINUTES = 20L
+
 /**
  * Builds the Home screen from the active source in stages, calling [onUpdate] as each is ready:
  * 1. the saved copy from the last run, so there is real content immediately;
@@ -21,12 +23,20 @@ suspend fun loadHomeState(
     source: Source?,
     client: SourceClient?,
     cache: LibraryCache,
+    forceRefresh: Boolean,
     onUpdate: (HomeState) -> Unit,
 ): HomeState {
     if (source == null || client == null) return HomeState.NoSource
 
     var shown = false
     val saved = withContext(Dispatchers.IO) { cache.loadHome(source.id) }
+    val savedAge = withContext(Dispatchers.IO) { cache.homeAgeMinutes(source.id) }
+    // A copy from the last few minutes is as good as new: show it and skip the network completely.
+    if (saved != null && !forceRefresh && savedAge != null && savedAge < FRESH_MINUTES &&
+        (saved.hero.isNotEmpty() || saved.movies.isNotEmpty() || saved.series.isNotEmpty())
+    ) {
+        return HomeState.Ready(saved)
+    }
     if (saved != null && (saved.hero.isNotEmpty() || saved.movies.isNotEmpty() || saved.series.isNotEmpty())) {
         onUpdate(HomeState.Ready(saved))
         shown = true

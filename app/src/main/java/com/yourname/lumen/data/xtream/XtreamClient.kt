@@ -3,6 +3,8 @@ package com.yourname.lumen.data.xtream
 import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.domain.model.ConnectionResult
 import android.util.Base64
+import android.util.JsonReader
+import android.util.JsonToken
 import android.util.Xml
 import com.yourname.lumen.domain.model.GuideEntry
 import com.yourname.lumen.domain.model.LibraryContent
@@ -17,6 +19,7 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.domain.model.Source
 import java.io.IOException
+import java.io.InputStreamReader
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.MalformedURLException
@@ -33,6 +36,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -113,7 +117,8 @@ class XtreamClient(private val source: Source) : SourceClient {
         }
 
         // Movies only have a small poster in the list, so ask for the wide backdrop of the few we feature.
-        val movieCandidates = movies.take(6).map { async { withDetails(it) } }.awaitAll()
+        val movieCandidates = movies.filter { it.posterUrl != null }.take(5)
+            .map { m -> async { withTimeoutOrNull(8_000) { withDetails(m) } ?: m } }.awaitAll()
         val heroMovies = movieCandidates.filter { it.backdropUrl != null }.ifEmpty { movieCandidates }.take(3)
 
         // Only titles with usable artwork can be featured.
@@ -198,26 +203,22 @@ class XtreamClient(private val source: Source) : SourceClient {
         }
     }
 
-    private suspend fun liveChannels(): List<LiveChannel> = withContext(Dispatchers.Default) {
-        val arr = JSONArray(fetch(url("get_live_streams")))
-        val out = ArrayList<LiveChannel>(arr.length())
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val id = o.optString("stream_id")
-            val name = cleanChannelName(o.optString("name"))
-            if (id.isBlank() || name.isEmpty()) continue
-            out.add(
-                LiveChannel(
-                    id = id,
-                    number = o.optInt("num", out.size + 1),
-                    name = name,
-                    logoUrl = o.str("stream_icon"),
-                    categoryId = o.optString("category_id"),
-                    epgId = o.str("epg_channel_id"),
-                ),
+    private suspend fun liveChannels(): List<LiveChannel> {
+        var counter = 0
+        return streamList(url("get_live_streams"), channelFields) { f ->
+            counter++
+            val id = f.str("stream_id") ?: return@streamList null
+            val name = cleanChannelName(f["name"].orEmpty())
+            if (name.isEmpty()) return@streamList null
+            LiveChannel(
+                id = id,
+                number = f["num"]?.toIntOrNull() ?: counter,
+                name = name,
+                logoUrl = f.str("stream_icon"),
+                categoryId = f["category_id"].orEmpty(),
+                epgId = f.str("epg_channel_id"),
             )
         }
-        out
     }
 
     /** Current and next programme for one channel, from the server's short guide. */
@@ -269,55 +270,116 @@ class XtreamClient(private val source: Source) : SourceClient {
     private val moviesLock = Mutex()
     private val seriesLock = Mutex()
 
+    /**
+     * Reads a big JSON list straight off the connection, one entry at a time, keeping only the
+     * fields in [wanted]. Nothing is ever held as one giant text or object tree, which is what made
+     * large libraries slow and memory-hungry to load. [build] turns an entry into what we keep.
+     */
+    private suspend fun <T> streamList(
+        url: String,
+        wanted: Set<String>,
+        build: (Map<String, String>) -> T?,
+    ): List<T> = withContext(Dispatchers.IO) {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 40_000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", "Lumen/0.1")
+            if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
+            JsonReader(InputStreamReader(conn.inputStream, Charsets.UTF_8).buffered(64 * 1024)).use { reader ->
+                val out = ArrayList<T>(2048)
+                // An empty or error reply isn't a list; treat it as no entries.
+                if (reader.peek() != JsonToken.BEGIN_ARRAY) return@use out
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+                        reader.skipValue()
+                        continue
+                    }
+                    val fields = HashMap<String, String>(12)
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        val name = reader.nextName()
+                        if (name in wanted) fields[name] = readScalar(reader) else reader.skipValue()
+                    }
+                    reader.endObject()
+                    build(fields)?.let { out.add(it) }
+                }
+                reader.endArray()
+                out
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** A value as text; for a list (like several backdrops) the first entry. */
+    private fun readScalar(reader: JsonReader): String = when (reader.peek()) {
+        JsonToken.STRING, JsonToken.NUMBER -> reader.nextString()
+        JsonToken.BOOLEAN -> reader.nextBoolean().toString()
+        JsonToken.NULL -> {
+            reader.nextNull()
+            ""
+        }
+        JsonToken.BEGIN_ARRAY -> {
+            reader.beginArray()
+            var first = ""
+            while (reader.hasNext()) {
+                if (first.isEmpty() && reader.peek() == JsonToken.STRING) first = reader.nextString() else reader.skipValue()
+            }
+            reader.endArray()
+            first
+        }
+        else -> {
+            reader.skipValue()
+            ""
+        }
+    }
+
+    private val movieFields = setOf("stream_id", "name", "year", "rating", "stream_icon", "added", "category_id")
+    private val seriesFields = setOf("series_id", "name", "year", "rating", "plot", "cover", "backdrop_path", "last_modified", "category_id")
+    private val channelFields = setOf("stream_id", "name", "num", "stream_icon", "category_id", "epg_channel_id")
+
     /** Every movie, newest first. Fetched once per connection and kept, so Home and search share it. */
     private suspend fun allMovies(): List<MediaItem> = moviesLock.withLock {
-        moviesAll ?: withContext(Dispatchers.Default) {
-            val arr = JSONArray(fetch(url("get_vod_streams")))
-            val raw = ArrayList<JSONObject>(arr.length())
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                if (o.optString("stream_id").isNotBlank()) raw.add(o)
-            }
-            raw.sortedByDescending { it.optString("added").toLongOrNull() ?: 0L }
-                .map { o ->
-                    val name = o.optString("name")
-                    MediaItem(
-                        id = o.optString("stream_id"),
-                        type = MediaType.Movie,
-                        title = cleanTitle(name),
-                        year = yearOf(name, o.optString("year")),
-                        rating = ratingOf(o.optString("rating")),
-                        plot = null,
-                        posterUrl = o.str("stream_icon"),
-                        backdropUrl = null,
-                    )
-                }
+        moviesAll ?: withContext(Dispatchers.IO) {
+            streamList(url("get_vod_streams"), movieFields) { f ->
+                val id = f.str("stream_id") ?: return@streamList null
+                val name = f["name"].orEmpty()
+                (f["added"]?.toLongOrNull() ?: 0L) to MediaItem(
+                    id = id,
+                    type = MediaType.Movie,
+                    title = cleanTitle(name),
+                    year = yearOf(name, f["year"].orEmpty()),
+                    rating = ratingOf(f["rating"].orEmpty()),
+                    plot = null,
+                    posterUrl = f.str("stream_icon"),
+                    backdropUrl = null,
+                    categoryId = f.str("category_id"),
+                )
+            }.sortedByDescending { it.first }.map { it.second }
         }.also { moviesAll = it }
     }
 
     /** Every series, newest first. See [allMovies]. */
     private suspend fun allSeries(): List<MediaItem> = seriesLock.withLock {
-        seriesAll ?: withContext(Dispatchers.Default) {
-            val arr = JSONArray(fetch(url("get_series")))
-            val raw = ArrayList<JSONObject>(arr.length())
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                if (o.optString("series_id").isNotBlank()) raw.add(o)
-            }
-            raw.sortedByDescending { it.optString("last_modified").toLongOrNull() ?: 0L }
-                .map { o ->
-                    val name = o.optString("name")
-                    MediaItem(
-                        id = o.optString("series_id"),
-                        type = MediaType.Series,
-                        title = cleanTitle(name),
-                        year = o.str("year") ?: yearOf(name, ""),
-                        rating = ratingOf(o.optString("rating")),
-                        plot = o.str("plot"),
-                        posterUrl = o.str("cover"),
-                        backdropUrl = o.firstOf("backdrop_path")?.let { upgradeImage(it) },
-                    )
-                }
+        seriesAll ?: withContext(Dispatchers.IO) {
+            streamList(url("get_series"), seriesFields) { f ->
+                val id = f.str("series_id") ?: return@streamList null
+                val name = f["name"].orEmpty()
+                (f["last_modified"]?.toLongOrNull() ?: 0L) to MediaItem(
+                    id = id,
+                    type = MediaType.Series,
+                    title = cleanTitle(name),
+                    year = f.str("year") ?: yearOf(name, ""),
+                    rating = ratingOf(f["rating"].orEmpty()),
+                    plot = f.str("plot"),
+                    posterUrl = f.str("cover"),
+                    backdropUrl = f.str("backdrop_path")?.let { upgradeImage(it) },
+                    categoryId = f.str("category_id"),
+                )
+            }.sortedByDescending { it.first }.map { it.second }
         }.also { seriesAll = it }
     }
 
@@ -325,6 +387,17 @@ class XtreamClient(private val source: Source) : SourceClient {
     private suspend fun newestMovies(): List<MediaItem> = allMovies().filter { it.posterUrl != null }.take(30)
 
     private suspend fun newestSeries(): List<MediaItem> = allSeries().filter { it.posterUrl != null }.take(30)
+
+    override suspend fun loadCategories(type: MediaType): List<LiveCategory> = withContext(Dispatchers.Default) {
+        val action = if (type == MediaType.Movie) "get_vod_categories" else "get_series_categories"
+        val arr = JSONArray(fetch(url(action)))
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val id = o.optString("category_id")
+            val name = o.optString("category_name").trim()
+            if (id.isBlank() || name.isEmpty()) null else LiveCategory(id, name)
+        }
+    }
 
     override suspend fun loadLibrary(): LibraryContent = coroutineScope {
         val movies = async { allMovies() }
@@ -432,6 +505,9 @@ fun describeFailure(e: Exception): String = when (e) {
     }
     else -> "Could not connect to this source."
 }
+
+private fun Map<String, String>.str(key: String): String? =
+    this[key]?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
 
 private fun JSONObject.str(key: String): String? =
     optString(key, "").trim().takeIf { it.isNotEmpty() && it != "null" }
