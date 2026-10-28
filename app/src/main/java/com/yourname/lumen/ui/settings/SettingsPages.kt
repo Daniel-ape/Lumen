@@ -342,6 +342,14 @@ internal fun LazyListScope.generalItems(settings: AppSettings, actions: Settings
             onToggle = { settings.updateConfirmDestructive(!settings.confirmDestructive) },
         )
     }
+    item(key = "dock_focus") {
+        SettingToggleRow(
+            label = "Open pages as you move across the menu",
+            description = "Moving over Home, Live TV, Movies and the other menu items opens them straight away. Turn off to open them with OK.",
+            checked = settings.dockSwitchOnFocus,
+            onToggle = { settings.updateDockSwitchOnFocus(!settings.dockSwitchOnFocus) },
+        )
+    }
     item(key = "reset_prefs") {
         val confirm = LocalConfirm.current
         SettingActionRow(

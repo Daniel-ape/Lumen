@@ -58,6 +58,7 @@ fun LumenDock(
     selected: Section,
     slots: SnapshotStateMap<Section, DockSlot>,
     onSelect: (Section) -> Unit,
+    onItemFocused: (Section) -> Unit,
     selectedFocusRequester: FocusRequester,
     downTarget: FocusRequester,
     onDockFocusChange: (Boolean) -> Unit,
@@ -80,6 +81,7 @@ fun LumenDock(
                 DockItem(
                     selected = isSelected,
                     onClick = { onSelect(section) },
+                    onFocused = { onItemFocused(section) },
                     modifier = Modifier
                         .onGloballyPositioned { coordinates ->
                             val slot = DockSlot(
@@ -123,6 +125,7 @@ private fun SelectionIndicator(slot: DockSlot) {
 private fun DockItem(
     selected: Boolean,
     onClick: () -> Unit,
+    onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable (Color) -> Unit,
 ) {
@@ -134,7 +137,10 @@ private fun DockItem(
                 shape = DockShape,
                 focusedScale = 1.04f,
                 showOutline = false,
-                onFocusChange = { focused = it },
+                onFocusChange = {
+                    focused = it
+                    if (it) onFocused()
+                },
             )
             .background(if (focused) Color(0x26FFFFFF) else Color.Transparent, DockShape)
             .padding(horizontal = 14.dp, vertical = 7.dp),

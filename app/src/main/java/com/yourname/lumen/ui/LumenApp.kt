@@ -3,6 +3,7 @@ package com.yourname.lumen.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -225,35 +227,62 @@ fun LumenApp(settings: AppSettings) {
         }
     }
 
-    // Search data, loaded only once Search is opened: the whole library (saved copy first, then a fresh one
-    // if it is missing or over a day old), then the programme guide once the channels are known.
-    LaunchedEffect(section, loadKey) {
-        val id = activeSource?.id
-        val current = client
-        val needsLibrary = section == Section.Search || section == Section.Movies || section == Section.Series
-        if (!needsLibrary || id == null || current == null) return@LaunchedEffect
-        if (libraryFor != id) {
-            library = null
-            libraryFor = id
-        }
-        if (library != null) return@LaunchedEffect
+    // The full movie and series list. It is big, so it loads in the background after Home is already on
+    // screen (or at once if Movies, Series or Search is opened first), and the download is never cancelled by
+    // moving between screens. A saved copy is shown first; a fresh one is fetched if it is missing or old.
+    fun ensureLibrary() {
+        val id = activeSource?.id ?: return
+        val current = client ?: return
+        if (libraryFor == id && (libraryLoading || library != null)) return
+        libraryFor = id
+        library = null
         libraryLoading = true
-        val saved = withContext(Dispatchers.IO) { libraryCache.loadLibrary(id) }
-        if (saved != null) library = saved.first
-        // A copy saved before categories existed has none; it is replaced with a fresh one.
-        val hasCategories = saved != null && (saved.first.movies.any { it.categoryId != null } || saved.first.series.any { it.categoryId != null })
-        if (saved == null || saved.second > 24 * 60 || !hasCategories) {
+        scope.launch {
             try {
-                val fresh = current.loadLibrary()
-                library = fresh
-                withContext(Dispatchers.IO) { runCatching { libraryCache.saveLibrary(id, fresh) } }
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                AppLog.add("Could not load the full library for search")
+                val saved = withContext(Dispatchers.IO) { libraryCache.loadLibrary(id) }
+                if (saved != null && libraryFor == id) library = saved.first
+                // A copy saved before categories existed has none; it is replaced with a fresh one.
+                val hasCategories = saved != null &&
+                    (saved.first.movies.any { it.categoryId != null } || saved.first.series.any { it.categoryId != null })
+                if (saved == null || saved.second > 24 * 60 || !hasCategories) {
+                    try {
+                        val fresh = current.loadLibrary()
+                        if (libraryFor == id) library = fresh
+                        withContext(Dispatchers.IO) { runCatching { libraryCache.saveLibrary(id, fresh) } }
+                        // Now that the true newest titles are known, Home's rows are refreshed from them: saved
+                        // for next time, and shown now unless you are looking at Home (rows must not move under you).
+                        val ready = homeState as? HomeState.Ready
+                        val newestMovies = fresh.movies.filter { it.posterUrl != null }.take(20)
+                        val newestSeries = fresh.series.filter { it.posterUrl != null }.take(20)
+                        if (ready != null && libraryFor == id && (newestMovies.isNotEmpty() || newestSeries.isNotEmpty())) {
+                            val updated = ready.content.copy(
+                                movies = newestMovies.ifEmpty { ready.content.movies },
+                                series = newestSeries.ifEmpty { ready.content.series },
+                            )
+                            withContext(Dispatchers.IO) { runCatching { libraryCache.saveHome(id, updated) } }
+                            if (section != Section.Home) homeState = HomeState.Ready(updated)
+                        }
+                    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        AppLog.add("Could not load the full library: ${e.message ?: "unknown error"}")
+                    }
+                }
+            } finally {
+                if (libraryFor == id) libraryLoading = false
             }
         }
-        libraryLoading = false
+    }
+
+    LaunchedEffect(section, loadKey, homeFor) {
+        val wanted = section == Section.Search || section == Section.Movies || section == Section.Series
+        val background = homeFor != null && homeFor == activeSource?.id
+        if (wanted) {
+            ensureLibrary()
+        } else if (background) {
+            delay(2_500)
+            ensureLibrary()
+        }
     }
 
     LaunchedEffect(section, loadKey) {
@@ -356,6 +385,25 @@ fun LumenApp(settings: AppSettings) {
         if (section != Section.Home) homeAtTop = true
     }
     val dockVisible = !fullscreen && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
+
+    // Moving across the dock opens each page after a short pause, so sweeping past items does not load them.
+    // The pause is cancelled the moment focus leaves the dock.
+    var dockFocusTarget by remember { mutableStateOf<Section?>(null) }
+    LaunchedEffect(dockFocusTarget, dockHasFocus) {
+        val target = dockFocusTarget
+        if (dockHasFocus && target != null && target != section && settings.dockSwitchOnFocus) {
+            delay(320)
+            section = target
+        }
+    }
+    LaunchedEffect(dockHasFocus) {
+        if (!dockHasFocus) dockFocusTarget = null
+    }
+
+    // Back on the menu of any other page goes to Home first; Back on Home's menu leaves the app.
+    BackHandler(enabled = dockHasFocus && section != Section.Home && formType == null && detailsItem == null && programmeDetails == null && !fullscreen) {
+        section = Section.Home
+    }
 
     // Back from content brings the dock back and moves focus to it; Back on the dock leaves the app.
     BackHandler(enabled = !dockHasFocus && formType == null && detailsItem == null && programmeDetails == null && !fullscreen) {
@@ -519,11 +567,12 @@ fun LumenApp(settings: AppSettings) {
             )
 
             else -> {
-                Crossfade(
-                    targetState = section,
-                    animationSpec = tween(msSection),
-                    label = "section",
-                ) { current ->
+                // Only one screen exists at a time, and it fades in. (A cross-fade kept the old screen alive
+                // for a moment too, and the remote could land on that invisible old screen.)
+                val fade = remember(section) { Animatable(0f) }
+                LaunchedEffect(section) { fade.animateTo(1f, tween(msSection)) }
+                Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) {
+                    val current = section
                     when (current) {
                         Section.Home -> HomeScreen(
                             state = homeState,
@@ -712,6 +761,7 @@ fun LumenApp(settings: AppSettings) {
                         selected = section,
                         slots = dockSlots,
                         onSelect = { section = it },
+                        onItemFocused = { dockFocusTarget = it },
                         selectedFocusRequester = dockFocus,
                         downTarget = contentFocus,
                         onDockFocusChange = { dockHasFocus = it },
