@@ -245,6 +245,7 @@ private fun labelOf(format: Format, index: Int): String {
 }
 
 /** The audio languages and subtitles the file carries, taken from the player itself. Nothing is made up. */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun TrackPanel(exo: androidx.media3.exoplayer.ExoPlayer, onClose: () -> Unit) {
     val type = LumenTheme.typography

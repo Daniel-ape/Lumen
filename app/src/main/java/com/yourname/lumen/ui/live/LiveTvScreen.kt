@@ -770,6 +770,7 @@ private fun InfoPanel(
 
 // ---------- the menu opened by holding OK on a channel
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun ChannelMenu(
     channel: LiveChannel,
