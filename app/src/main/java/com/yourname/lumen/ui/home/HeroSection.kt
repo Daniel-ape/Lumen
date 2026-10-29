@@ -1,5 +1,9 @@
 package com.yourname.lumen.ui.home
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -58,8 +62,6 @@ import kotlinx.coroutines.flow.collectLatest
 
 private val TextShadow = Shadow(color = Color(0xB3000000), offset = Offset(0f, 2f), blurRadius = 8f)
 
-// The colour at the bottom of the app background, so the picture melts into it with no edge.
-private val HeroFade = Color(0xFF121418)
 private const val SLIDE_MS = 8_000
 
 /**
@@ -108,27 +110,59 @@ fun HeroSection(
             val image = item.backdropUrl ?: item.posterUrl
             Box(modifier = Modifier.fillMaxSize()) {
                 if (image != null) {
-                    AsyncImage(
-                        model = backdropRequest(context, image),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    // The picture melts into the page in stages, so there is no edge where it ends.
+                    // The picture and its shading are drawn together and then faded to fully transparent toward the
+                    // bottom. Because it fades to nothing (not to a colour), whatever the page looks like behind it
+                    // shows through, so there is no edge and no line, wherever the page is scrolled to.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.38f to Color.Transparent,
-                                    0.58f to HeroFade.copy(alpha = 0.30f),
-                                    0.76f to HeroFade.copy(alpha = 0.72f),
-                                    0.92f to HeroFade.copy(alpha = 0.95f),
-                                    1f to HeroFade,
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0f to Color.Black,
+                                        0.55f to Color.Black,
+                                        0.72f to Color(0xCC000000),
+                                        0.86f to Color(0x66000000),
+                                        0.95f to Color(0x1A000000),
+                                        1f to Color.Transparent,
+                                    ),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            },
+                    ) {
+                        AsyncImage(
+                            model = backdropRequest(context, image),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.TopCenter,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // Shading for the text: darker on the left, and a soft band low down behind the title.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        0f to Color(0x99000000),
+                                        0.55f to Color(0x33000000),
+                                        1f to Color.Transparent,
+                                    ),
                                 ),
-                            ),
-                    )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        0.45f to Color.Transparent,
+                                        0.78f to Color(0x66000000),
+                                        1f to Color.Transparent,
+                                    ),
+                                ),
+                        )
+                    }
                 }
                 Column(
                     modifier = Modifier

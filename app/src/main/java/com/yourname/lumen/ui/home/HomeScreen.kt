@@ -1,5 +1,24 @@
 package com.yourname.lumen.ui.home
 
+import com.yourname.lumen.ui.components.ChannelLogo
+import com.yourname.lumen.core.designsystem.tvFocusable
+import com.yourname.lumen.core.designsystem.glass
+import com.yourname.lumen.core.designsystem.GlassLevel
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableIntStateOf
+import com.yourname.lumen.domain.model.LiveChannel
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -58,11 +77,16 @@ fun HomeScreen(
     onHeroIndex: (Int) -> Unit,
     restoreItemId: String?,
     onRestored: () -> Unit,
+    recentChannels: List<LiveChannel>,
+    recentFocusId: String?,
+    exitSignal: Int,
+    onPlayRecent: (LiveChannel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val topInset = with(LocalDensity.current) { 72.dp.roundToPx() }
-    val rowFocus = remember { List(2) { FocusRequester() } }
+    val rowFocus = remember { List(3) { FocusRequester() } }
+    val recentCardFocus = remember { FocusRequester() }
 
     // Horizontal rows keep Android's normal scrolling; only the page itself is scrolled by us.
     val defaultSpec = LocalBringIntoViewSpec.current
@@ -72,10 +96,32 @@ fun HomeScreen(
         }
     }
 
-    val rows: List<Pair<String, List<MediaItem>>> = (state as? HomeState.Ready)?.content?.let {
-        listOf("Recently added movies" to it.movies, "Recently added series" to it.series)
-            .filter { row -> row.second.isNotEmpty() }
-    } ?: emptyList()
+    // Rows under the hero. "Recently Watched Channels" exists only when there really is watch history.
+    val rows: List<HomeRow> = buildList {
+        if (state is HomeState.Ready && recentChannels.isNotEmpty()) {
+            add(HomeRow.Channels("Recently Watched Channels", recentChannels))
+        }
+        (state as? HomeState.Ready)?.content?.let {
+            if (it.movies.isNotEmpty()) add(HomeRow.Posters("Recently added movies", it.movies, 0))
+            if (it.series.isNotEmpty()) add(HomeRow.Posters("Recently added series", it.series, 1))
+        }
+    }
+
+    // Back from fullscreen: scroll to the row and put focus on the channel that was opened.
+    var seenExit by remember { mutableIntStateOf(exitSignal) }
+    LaunchedEffect(exitSignal) {
+        if (exitSignal != seenExit) {
+            seenExit = exitSignal
+            val k = rows.indexOfFirst { it is HomeRow.Channels }
+            val index = recentChannels.indexOfFirst { it.id == recentFocusId }
+            if (k >= 0 && index >= 0) {
+                listState.scrollToItem(1 + 2 * k, -topInset)
+                rowStates[0].scrollToItem(index)
+                delay(90)
+                runCatching { recentCardFocus.requestFocus() }
+            }
+        }
+    }
 
     // Tell the app when we are at the very top so it can hide or show the dock.
     // Two thresholds (leave at 80px, return at 8px) stop it flickering near the edge.
@@ -122,7 +168,7 @@ fun HomeScreen(
                 HomeState.Loading -> item {
                     HeroMessage(
                         title = "Loading…",
-                        message = "Getting what's new from your source.",
+                        message = "Getting what's new from your source. The first time can take a moment.",
                         primaryLabel = null,
                         onPrimary = {},
                         contentFocus = contentFocus,
@@ -181,24 +227,38 @@ fun HomeScreen(
                                 label = state.content.heroLabel,
                                 autoRotate = autoRotate,
                                 onOpenDetails = onOpenDetails,
-                                modifier = Modifier.fillParentMaxHeight(),
+                                // Tall enough to fill most of the screen; a sliver of the next row shows below it.
+                                modifier = Modifier.fillParentMaxHeight(0.94f),
                             )
                         }
                         rows.forEachIndexed { k, row ->
-                            item { SectionTitle(row.first) }
+                            item { SectionTitle(row.title) }
                             item {
                                 CompositionLocalProvider(LocalBringIntoViewSpec provides defaultSpec) {
-                                    PosterRow(
-                                        items = row.second,
-                                        showRatings = showRatings,
-                                        onOpen = onRowOpen,
-                                        state = rowStates[k],
-                                        restoreItemId = restoreItemId,
-                                        onRestored = onRestored,
-                                        firstFocus = rowFocus[k],
-                                        onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
-                                        onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
-                                    )
+                                    when (row) {
+                                        is HomeRow.Posters -> PosterRow(
+                                            items = row.items,
+                                            showRatings = showRatings,
+                                            onOpen = onRowOpen,
+                                            state = rowStates[1 + row.stateIndex],
+                                            restoreItemId = restoreItemId,
+                                            onRestored = onRestored,
+                                            firstFocus = rowFocus[k],
+                                            onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
+                                            onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
+                                        )
+
+                                        is HomeRow.Channels -> ChannelRow(
+                                            channels = row.channels,
+                                            state = rowStates[0],
+                                            focusId = recentFocusId,
+                                            focusRequester = recentCardFocus,
+                                            onPlay = onPlayRecent,
+                                            firstFocus = rowFocus[k],
+                                            onUp = { if (k == 0) goToHero() else goToRow(k - 1) },
+                                            onDown = { if (k < rows.lastIndex) goToRow(k + 1) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -267,4 +327,67 @@ private fun SectionTitle(text: String) {
             bottom = 4.dp,
         ),
     )
+}
+
+private sealed interface HomeRow {
+    val title: String
+
+    class Posters(override val title: String, val items: List<MediaItem>, val stateIndex: Int) : HomeRow
+
+    class Channels(override val title: String, val channels: List<LiveChannel>) : HomeRow
+}
+
+/** Channels the user has watched, newest first. Selecting one plays it straight away. */
+@Composable
+private fun ChannelRow(
+    channels: List<LiveChannel>,
+    state: LazyListState,
+    focusId: String?,
+    focusRequester: FocusRequester,
+    onPlay: (LiveChannel) -> Unit,
+    firstFocus: FocusRequester,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+) {
+    LazyRow(
+        state = state,
+        modifier = Modifier
+            .focusRequester(firstFocus)
+            .focusGroup()
+            .onDirection(Key.DirectionUp, onUp)
+            .onDirection(Key.DirectionDown, onDown),
+        contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.RowGap),
+    ) {
+        items(channels, key = { it.id }) { channel ->
+            ChannelCard(
+                channel = channel,
+                onClick = { onPlay(channel) },
+                modifier = if (channel.id == focusId) Modifier.focusRequester(focusRequester) else Modifier,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChannelCard(channel: LiveChannel, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = modifier
+            .width(176.dp)
+            .tvFocusable(onClick = onClick, shape = shape, focusedScale = 1.05f)
+            .glass(shape, GlassLevel.Panel)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(modifier = Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) {
+            ChannelLogo(channel, Modifier.size(60.dp))
+        }
+        LumenText(
+            text = channel.name,
+            style = LumenTheme.typography.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            maxLines = 1,
+        )
+    }
 }

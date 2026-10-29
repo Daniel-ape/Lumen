@@ -6,6 +6,8 @@ import com.yourname.lumen.domain.model.ConnectionResult
 import com.yourname.lumen.domain.model.GuideEntry
 import com.yourname.lumen.domain.model.HomeContent
 import com.yourname.lumen.domain.model.LibraryContent
+import com.yourname.lumen.domain.model.LiveCategory
+import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.domain.model.LiveChannel
 import com.yourname.lumen.domain.model.LiveContent
 import com.yourname.lumen.domain.model.MediaDetails
@@ -23,11 +25,21 @@ interface SourceClient {
     suspend fun checkConnection(): ConnectionResult
     /** Loads Home. [onPartial] is called with what is ready as soon as part of it is, so it can show early. */
     suspend fun loadHome(onPartial: (HomeContent) -> Unit = {}): HomeContent
-    suspend fun loadLive(): LiveContent
+    /** [onProgress] is told how many channels have arrived so far. */
+    suspend fun loadLive(onProgress: (Int) -> Unit = {}): LiveContent
     suspend fun loadDetails(item: MediaItem): MediaDetails?
 
+    /** The address that plays a movie file, or empty when the source cannot. */
+    fun vodUrl(itemId: String, extension: String): String
+
+    /** The address that plays one episode, or empty when the source cannot. */
+    fun episodeUrl(episodeId: String, extension: String): String
+
+    /** The source's categories for movies or series. */
+    suspend fun loadCategories(type: MediaType): List<LiveCategory>
+
     /** The whole movie and series list, for search. */
-    suspend fun loadLibrary(): LibraryContent
+    suspend fun loadLibrary(onMovies: (Int) -> Unit = {}, onSeries: (Int) -> Unit = {}): LibraryContent
 
     /**
      * The programme guide for these channels over the coming day or so, or null when the source has

@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -68,6 +69,7 @@ fun ChannelListRow(
     val colors = LumenTheme.colors
     val type = LumenTheme.typography
     var focused by remember { mutableStateOf(false) }
+    var longPressed by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
 
     // Ask for the guide only once the row has been on screen for a moment, so fast scrolling is cheap.
@@ -85,11 +87,29 @@ fun ChannelListRow(
         modifier = modifier
             .fillMaxWidth()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
-                    onMenu()
-                    true
-                } else {
-                    false
+                val isSelect = event.key == Key.DirectionCenter || event.key == Key.Enter
+                when {
+                    event.type == KeyEventType.KeyDown && event.key == Key.Menu -> {
+                        onMenu()
+                        true
+                    }
+
+                    // Holding OK (the remote repeats the key) opens the menu once, instead of playing the channel.
+                    event.type == KeyEventType.KeyDown && isSelect && event.nativeKeyEvent.repeatCount > 0 -> {
+                        if (!longPressed) {
+                            longPressed = true
+                            onMenu()
+                        }
+                        true
+                    }
+
+                    // Releasing OK after a long press must not also count as a normal click.
+                    event.type == KeyEventType.KeyUp && isSelect && longPressed -> {
+                        longPressed = false
+                        true
+                    }
+
+                    else -> false
                 }
             }
             .tvFocusable(

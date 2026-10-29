@@ -16,3 +16,7 @@ fun posterRequest(context: Context, url: String): ImageRequest =
 
 fun logoRequest(context: Context, url: String): ImageRequest =
     ImageRequest.Builder(context).data(url).size(96, 96).build()
+
+/** Episode thumbnails: small, so a row of them stays light. */
+fun thumbRequest(context: Context, url: String): ImageRequest =
+    ImageRequest.Builder(context).data(url).size(400, 225).crossfade(140).build()

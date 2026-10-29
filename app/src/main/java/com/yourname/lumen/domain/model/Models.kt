@@ -28,6 +28,10 @@ data class MediaItem(
     val plot: String?,
     val posterUrl: String?,
     val backdropUrl: String?,
+    /** The source's category for this title, used by the Movies and Series screens. */
+    val categoryId: String? = null,
+    /** Genres as the source lists them (series lists carry them; movie lists do not). */
+    val genre: String? = null,
 )
 
 /** Everything the details page can show. Fields are null when the source doesn't provide them. */
@@ -44,6 +48,22 @@ data class MediaDetails(
     val seasons: Int?,
     val posterUrl: String?,
     val backdropUrl: String?,
+    /** For series: every episode the source lists. */
+    val episodes: List<Episode> = emptyList(),
+    /** For movies: the file type the source plays it as (mp4, mkv ...). */
+    val streamExtension: String? = null,
+)
+
+/** One episode of a series, as listed by the source. */
+data class Episode(
+    val id: String,
+    val season: Int,
+    val number: Int,
+    val title: String,
+    val plot: String?,
+    val imageUrl: String?,
+    val extension: String,
+    val duration: String?,
 )
 
 data class HomeContent(
@@ -105,6 +125,9 @@ sealed interface LiveState {
 
 /** Favorites are saved per source, so two providers can't mix up channel ids. */
 fun favoriteKey(sourceId: String, channel: LiveChannel): String = "$sourceId:${channel.id}"
+
+/** The saved-list key for a movie or series of one connection. */
+fun myListKey(sourceId: String, item: MediaItem): String = "$sourceId|${item.type.name}|${item.id}"
 
 // ---------- Search
 

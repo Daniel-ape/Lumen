@@ -1,6 +1,7 @@
 package com.yourname.lumen.data.home
 
 import com.yourname.lumen.core.diagnostics.AppLog
+import com.yourname.lumen.core.diagnostics.Perf
 import com.yourname.lumen.data.cache.LibraryCache
 import com.yourname.lumen.data.source.SourceClient
 import com.yourname.lumen.data.xtream.describeFailure
@@ -29,7 +30,7 @@ suspend fun loadHomeState(
     if (source == null || client == null) return HomeState.NoSource
 
     var shown = false
-    val saved = withContext(Dispatchers.IO) { cache.loadHome(source.id) }
+    val saved = Perf.time("Saved Home copy read") { withContext(Dispatchers.IO) { cache.loadHome(source.id) } }
     val savedAge = withContext(Dispatchers.IO) { cache.homeAgeMinutes(source.id) }
     // A copy from the last few minutes is as good as new: show it and skip the network completely.
     if (saved != null && !forceRefresh && savedAge != null && savedAge < FRESH_MINUTES &&

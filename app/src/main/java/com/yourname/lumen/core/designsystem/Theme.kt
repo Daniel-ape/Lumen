@@ -42,14 +42,14 @@ object Dimens {
 }
 
 private val DarkColors = LumenColors(
-    background = Color(0xFF14161A),
+    background = Color(0xFF0D0F16),
     surface = Color(0x0FFFFFFF),
     surfaceHigh = Color(0x1FFFFFFF),
-    dock = Color(0xE61E1E24),
+    dock = Color(0xE6181B26),
     textPrimary = Color(0xFFFFFFFF),
-    textSecondary = Color(0xFF9A9AA2),
-    textTertiary = Color(0xFF63636B),
-    accent = Color(0xFF4C8DFF),
+    textSecondary = Color(0xFFA0A6BC),
+    textTertiary = Color(0xFF686E84),
+    accent = Color(0xFF7C9BFF),
 )
 
 private val DefaultTypography = LumenTypography(

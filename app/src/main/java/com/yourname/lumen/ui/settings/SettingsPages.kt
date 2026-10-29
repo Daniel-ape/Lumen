@@ -1,5 +1,7 @@
 package com.yourname.lumen.ui.settings
 
+import com.yourname.lumen.core.diagnostics.formatMillis
+import com.yourname.lumen.core.diagnostics.Perf
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -342,6 +344,14 @@ internal fun LazyListScope.generalItems(settings: AppSettings, actions: Settings
             onToggle = { settings.updateConfirmDestructive(!settings.confirmDestructive) },
         )
     }
+    item(key = "dock_focus") {
+        SettingToggleRow(
+            label = "Open pages as you move across the menu",
+            description = "Moving over Home, Live TV, Movies and the other menu items opens them straight away. Turn off to open them with OK.",
+            checked = settings.dockSwitchOnFocus,
+            onToggle = { settings.updateDockSwitchOnFocus(!settings.dockSwitchOnFocus) },
+        )
+    }
     item(key = "reset_prefs") {
         val confirm = LocalConfirm.current
         SettingActionRow(
@@ -606,6 +616,48 @@ internal fun LazyListScope.storageItems(info: SettingsInfo, settings: AppSetting
 
 internal fun LazyListScope.aboutItems() {
     item(key = "about") { AboutContent() }
+    item(key = "perf_title") { SettingGroupTitle("Loading times") }
+    item(key = "perf") {
+        val timings = Perf.timings
+        if (timings.isEmpty()) {
+            SettingNote("Nothing measured yet. Open Home, Live TV or Search and the times appear here.")
+        } else {
+            val slowest = timings.filter { !it.milestone }.maxByOrNull { it.millis }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glass(CardShape, GlassLevel.Panel)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (slowest != null) {
+                    LumenText(
+                        "Slowest step so far: ${slowest.label} (${formatMillis(slowest.millis)})",
+                        LumenTheme.typography.label.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        color = LumenTheme.colors.accent,
+                        maxLines = 2,
+                    )
+                }
+                timings.take(16).forEach { t ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LumenText(
+                            text = t.label + (t.detail?.let { " · $it" } ?: ""),
+                            style = LumenTheme.typography.label.copy(fontSize = 12.sp),
+                            color = if (t.milestone) Color.White else LumenTheme.colors.textSecondary,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                        LumenText(
+                            text = formatMillis(t.millis),
+                            style = LumenTheme.typography.label.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                            color = Color.White,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
     item(key = "diag_title") { SettingGroupTitle("Diagnostics") }
     item(key = "diag") {
         val entries = AppLog.entries
@@ -627,7 +679,7 @@ internal fun LazyListScope.aboutItems() {
     }
     item(key = "diag_clear") {
         if (AppLog.entries.isNotEmpty()) {
-            SettingActionRow(label = "Clear log", description = null, onClick = { AppLog.clear() })
+            SettingActionRow(label = "Clear log", description = null, onClick = { AppLog.clear(); Perf.clear() })
         }
     }
 }

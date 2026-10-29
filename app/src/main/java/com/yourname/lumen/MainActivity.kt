@@ -6,12 +6,14 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.remember
 import com.yourname.lumen.core.designsystem.AppearanceFlags
 import com.yourname.lumen.core.designsystem.LumenTheme
+import com.yourname.lumen.core.diagnostics.Perf
 import com.yourname.lumen.data.settings.AppSettings
 import com.yourname.lumen.ui.LumenApp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Perf.markStart()
         // The saved appearance is loaded here, before anything is drawn, so the first frame already
         // uses it and the old look never flashes. It stays fixed until the next launch.
         val settings = AppSettings(applicationContext)

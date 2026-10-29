@@ -21,6 +21,7 @@ suspend fun loadLiveState(
     client: SourceClient?,
     cache: LibraryCache,
     forceRefresh: Boolean,
+    onProgress: (Int) -> Unit = {},
     onUpdate: (LiveState) -> Unit,
 ): LiveState {
     if (source == null || client == null) return LiveState.NoSource
@@ -33,7 +34,7 @@ suspend fun loadLiveState(
     }
 
     return try {
-        val content = client.loadLive()
+        val content = client.loadLive(onProgress)
         withContext(Dispatchers.IO) { runCatching { cache.saveLive(source.id, content) } }
         AppLog.add("Loaded ${content.channels.size} channels from ${source.name}")
         LiveState.Ready(content)

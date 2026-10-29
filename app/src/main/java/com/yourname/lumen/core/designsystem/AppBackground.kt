@@ -18,50 +18,55 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.math.roundToInt
 
 /**
- * The app-wide backdrop: a soft charcoal gradient with a few very faint, wide pools of lighter grey
- * that give it a blurred, out-of-focus depth.
+ * The app-wide backdrop: a deep blue-black gradient with a few wide, soft pools of colour (indigo at the
+ * top right, teal at the bottom left, a faint violet in the middle). The colours are kept low so the app
+ * stays dark and calm but no longer reads as flat grey.
  *
- * It is painted once into a small picture and then simply stretched over the screen, so every frame
- * costs one textured rectangle instead of several full-screen gradients. The softness hides the
- * enlargement completely. It is never drawn over fullscreen video.
+ * It is painted once into a small picture and then only stretched across the screen. That keeps the look
+ * smooth (the stretching blurs it) while costing the graphics chip one cheap draw per frame. It never
+ * animates and is never drawn over fullscreen video.
  */
 @Composable
 fun AppBackground(modifier: Modifier = Modifier) {
     if (LocalAppearanceFlags.current.reducedBackground) {
-        Box(modifier = modifier.fillMaxSize().background(Color(0xFF16181C)))
+        Box(modifier = modifier.fillMaxSize().background(Color(0xFF10121A)))
         return
     }
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawWithCache {
-                val width = 320
+                val width = 360
                 val height = (width * size.height / size.width).roundToInt().coerceAtLeast(1)
                 val bitmap = ImageBitmap(width, height)
-                CanvasDrawScope().draw(this, layoutDirection, Canvas(bitmap), Size(width.toFloat(), height.toFloat())) {
+                val target = Size(width.toFloat(), height.toFloat())
+                CanvasDrawScope().draw(this, layoutDirection, Canvas(bitmap), target) {
                     drawRect(
                         Brush.verticalGradient(
-                            listOf(Color(0xFF1B1E23), Color(0xFF16181C), Color(0xFF121418)),
+                            listOf(Color(0xFF151824), Color(0xFF10121B), Color(0xFF0B0C12)),
                         ),
                     )
+                    // indigo, top right
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(Color(0x40303640), Color.Transparent),
-                            center = Offset(this.size.width * 0.86f, this.size.height * 0.08f),
-                            radius = this.size.width * 0.62f,
+                            colors = listOf(Color(0x5C3C44B8), Color.Transparent),
+                            center = Offset(this.size.width * 0.88f, this.size.height * 0.06f),
+                            radius = this.size.width * 0.66f,
                         ),
                     )
+                    // teal, bottom left
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(Color(0x1E303640), Color.Transparent),
-                            center = Offset(this.size.width * 0.08f, this.size.height * 0.92f),
-                            radius = this.size.width * 0.58f,
+                            colors = listOf(Color(0x401E8C94), Color.Transparent),
+                            center = Offset(this.size.width * 0.06f, this.size.height * 0.94f),
+                            radius = this.size.width * 0.6f,
                         ),
                     )
+                    // a faint violet in the middle, for depth
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(Color(0x1E3A414B), Color.Transparent),
-                            center = Offset(this.size.width * 0.5f, this.size.height * 0.5f),
+                            colors = listOf(Color(0x2E7A3FA8), Color.Transparent),
+                            center = Offset(this.size.width * 0.52f, this.size.height * 0.5f),
                             radius = this.size.width * 0.5f,
                         ),
                     )

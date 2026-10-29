@@ -23,35 +23,35 @@ enum class GlassLevel(
 ) {
     /** Large panels: the quietest level, so content on top stays readable. */
     Panel(
-        body = Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color(0x0EFFFFFF))),
+        body = Brush.verticalGradient(listOf(Color(0x24E2E8FF), Color(0x0EE2E8FF))),
         sheen = Brush.linearGradient(0f to Color(0x18FFFFFF), 0.45f to Color.Transparent),
         rim = Brush.linearGradient(listOf(Color(0x66FFFFFF), Color(0x14FFFFFF), Color(0x2EFFFFFF))),
     ),
 
     /** Secondary buttons and list rows. */
     Control(
-        body = Brush.verticalGradient(listOf(Color(0x2AFFFFFF), Color(0x12FFFFFF))),
+        body = Brush.verticalGradient(listOf(Color(0x2AE2E8FF), Color(0x12E2E8FF))),
         sheen = Brush.linearGradient(0f to Color(0x1FFFFFFF), 0.5f to Color.Transparent),
         rim = Brush.linearGradient(listOf(Color(0x73FFFFFF), Color(0x18FFFFFF), Color(0x33FFFFFF))),
     ),
 
     /** The main action on a screen. */
     Primary(
-        body = Brush.verticalGradient(listOf(Color(0x47FFFFFF), Color(0x24F2F6FF))),
+        body = Brush.verticalGradient(listOf(Color(0x47E2E8FF), Color(0x24E2E8FF))),
         sheen = Brush.linearGradient(0f to Color(0x2EFFFFFF), 0.55f to Color.Transparent),
         rim = Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x24FFFFFF), Color(0x4DFFFFFF))),
     ),
 
     /** The floating navigation dock. */
     Nav(
-        body = Brush.verticalGradient(listOf(Color(0x33FFFFFF), Color(0x14FFFFFF))),
+        body = Brush.verticalGradient(listOf(Color(0x33E2E8FF), Color(0x14E2E8FF))),
         sheen = Brush.linearGradient(0f to Color(0x22FFFFFF), 0.5f to Color.Transparent),
         rim = Brush.linearGradient(listOf(Color(0x80FFFFFF), Color(0x1AFFFFFF), Color(0x40FFFFFF))),
     ),
 
     /** The chosen item inside a glass surface, like the dock's selection pill. */
     Selected(
-        body = Brush.verticalGradient(listOf(Color(0x52FFFFFF), Color(0x2AFFFFFF))),
+        body = Brush.verticalGradient(listOf(Color(0x52E2E8FF), Color(0x2AE2E8FF))),
         sheen = Brush.linearGradient(0f to Color(0x30FFFFFF), 0.6f to Color.Transparent),
         rim = Brush.linearGradient(listOf(Color(0x8CFFFFFF), Color(0x20FFFFFF), Color(0x44FFFFFF))),
     ),

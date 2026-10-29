@@ -1,5 +1,18 @@
 package com.yourname.lumen.ui.library
 
+import kotlinx.coroutines.delay
+import com.yourname.lumen.core.designsystem.motionMs
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +63,6 @@ import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.ui.components.PosterCard
 
-private val SidebarColor = Color(0xB3090A0C)
 private val SortLabels = listOf("Newest", "A–Z", "Top rated")
 
 private class Tab(val id: String?, val name: String, val count: Int)
@@ -110,91 +122,136 @@ fun LibraryScreen(
         }
     }
 
-    Row(modifier = modifier.fillMaxSize().padding(top = 64.dp)) {
-        // ---- categories: a flat, darker strip
-        Box(modifier = Modifier.width(196.dp).fillMaxHeight().background(SidebarColor)) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(tabs, key = { _, t -> t.id ?: "all" }) { i, t ->
-                    CategoryRow(
-                        tab = t,
-                        selected = i == tabIndex,
-                        onFocused = { onCategoryIndex(i) },
-                        modifier = Modifier
-                            .routeKey(Key.DirectionRight, contentFocus)
-                            .then(if (i == 0) Modifier.onDirection(Key.DirectionUp) { runCatching { dockFocus.requestFocus() } } else Modifier),
-                    )
-                }
-            }
+    // The category list shows when you arrive and whenever you press LEFT from the first column. It slides
+    // away shortly after focus moves onto the posters, and stays while you are using it.
+    var sidebarVisible by remember { mutableStateOf(true) }
+    var posterFocused by remember { mutableStateOf(false) }
+    var sidebarFocused by remember { mutableStateOf(false) }
+    val categoryFocus = remember { FocusRequester() }
+    LaunchedEffect(posterFocused, sidebarFocused) {
+        if (posterFocused && !sidebarFocused) {
+            delay(900)
+            sidebarVisible = false
+        } else if (sidebarFocused) {
+            sidebarVisible = true
         }
+    }
+    val sidebarWidth by animateDpAsState(if (sidebarVisible) 196.dp else 0.dp, tween(motionMs(220)), label = "libSidebar")
+    val sidebarAlpha by animateFloatAsState(if (sidebarVisible) 1f else 0f, tween(motionMs(220)), label = "libSidebarAlpha")
 
-        // ---- title, sort, and the grid
-        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 18.dp, end = Dimens.ScreenPadding, top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                LumenText(title, type.title.copy(fontSize = 22.sp))
-                LumenText(
-                    text = if (tab.id == null) "${shown.size}" else "${tab.name} · ${shown.size}",
-                    style = type.label,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
-                if (shown.isNotEmpty()) {
-                    LumenButton(
-                        text = "Sort: ${SortLabels[sortMode.coerceIn(0, SortLabels.lastIndex)]}",
-                        compact = true,
-                        onClick = { onSortMode((sortMode + 1) % SortLabels.size) },
-                    )
+    BoxWithConstraints(modifier = modifier.fillMaxSize().padding(top = 64.dp)) {
+        // Six posters across on a typical TV; fewer on narrow screens, never more than six.
+        val columns = when {
+            maxWidth >= 800.dp -> 6
+            maxWidth >= 640.dp -> 5
+            maxWidth >= 480.dp -> 4
+            else -> 3
+        }
+        Row(modifier = Modifier.fillMaxSize()) {
+            // ---- categories, straight on the page background: no panel, no shadow
+            Box(modifier = Modifier.width(sidebarWidth).fillMaxHeight().clipToBounds()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .width(196.dp)
+                        .fillMaxHeight()
+                        .graphicsLayer { alpha = sidebarAlpha },
+                    contentPadding = PaddingValues(start = 36.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    itemsIndexed(tabs, key = { _, t -> t.id ?: "all" }) { i, t ->
+                        CategoryRow(
+                            tab = t,
+                            selected = i == tabIndex,
+                            onFocused = { onCategoryIndex(i) },
+                            modifier = Modifier
+                                .then(if (i == tabIndex) Modifier.focusRequester(categoryFocus) else Modifier)
+                                .onFocusChanged { sidebarFocused = it.hasFocus }
+                                .routeKey(Key.DirectionRight, contentFocus)
+                                .then(if (i == 0) Modifier.onDirection(Key.DirectionUp) { runCatching { dockFocus.requestFocus() } } else Modifier),
+                        )
+                    }
                 }
             }
 
-            when {
-                !hasSource -> Message("Add a connection to see your $noun.", "Add connection", onAddSource)
-                !sourceHasLibrary -> Message("This source is a playlist, and playlists only carry live channels, so there are no $noun to show.")
-                items.isEmpty() && loading -> Message("Loading $noun…")
-                items.isEmpty() -> Message("No $noun were found on this source.")
-                shown.isEmpty() -> Message("Nothing in this category.")
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 150.dp),
-                    state = gridState,
-                    modifier = Modifier.fillMaxSize(),
-                    // The padding leaves room for the focus scale-up, so a focused poster is never cut off.
-                    contentPadding = PaddingValues(start = 16.dp, end = Dimens.ScreenPadding, top = 14.dp, bottom = 40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+            // ---- title, sort, and the grid
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = Dimens.ScreenPadding, top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    gridItemsIndexed(shown, key = { _, m -> m.type.name + m.id }) { index, m ->
-                        val restore = remember { FocusRequester() }
-                        val isRestoreTarget = restoreItemId != null && m.id == restoreItemId
-                        LaunchedEffect(isRestoreTarget) {
-                            if (isRestoreTarget) {
-                                runCatching { restore.requestFocus() }
-                                onRestored()
-                            }
-                        }
-                        PosterCard(
-                            title = m.title,
-                            subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
-                                .joinToString(" · "),
-                            hue = hueOf(m.title),
-                            imageUrl = m.posterUrl,
-                            fillWidth = true,
-                            onClick = { onOpen(m) },
-                            modifier = when {
-                                isRestoreTarget -> Modifier.focusRequester(restore)
-                                index == 0 -> Modifier.focusRequester(contentFocus)
-                                else -> Modifier
-                            },
+                    LumenText(title, type.title.copy(fontSize = 22.sp))
+                    LumenText(
+                        text = if (tab.id == null) "${shown.size}" else "${tab.name} · ${shown.size}",
+                        style = type.label,
+                        color = colors.textTertiary,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (shown.isNotEmpty()) {
+                        LumenButton(
+                            text = "Sort: ${SortLabels[sortMode.coerceIn(0, SortLabels.lastIndex)]}",
+                            compact = true,
+                            onClick = { onSortMode((sortMode + 1) % SortLabels.size) },
                         )
+                    }
+                }
+
+                when {
+                    !hasSource -> Message("Add a connection to see your $noun.", "Add connection", onAddSource)
+                    !sourceHasLibrary -> Message("This source is a playlist, and playlists only carry live channels, so there are no $noun to show.")
+                    items.isEmpty() && loading -> Message("Loading $noun…")
+                    items.isEmpty() -> Message("No $noun were found on this source.")
+                    shown.isEmpty() -> Message("Nothing in this category.")
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        state = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                        // The padding leaves room for the focus scale-up, so a focused poster is never cut off.
+                        contentPadding = PaddingValues(start = 18.dp, end = Dimens.ScreenPadding, top = 14.dp, bottom = 40.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp),
+                    ) {
+                        gridItemsIndexed(shown, key = { _, m -> m.type.name + m.id }) { index, m ->
+                            val restore = remember { FocusRequester() }
+                            val isRestoreTarget = restoreItemId != null && m.id == restoreItemId
+                            LaunchedEffect(isRestoreTarget) {
+                                if (isRestoreTarget) {
+                                    runCatching { restore.requestFocus() }
+                                    onRestored()
+                                }
+                            }
+                            PosterCard(
+                                title = m.title,
+                                subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
+                                    .joinToString(" · "),
+                                hue = hueOf(m.title),
+                                imageUrl = m.posterUrl,
+                                fillWidth = true,
+                                onClick = { onOpen(m) },
+                                modifier = Modifier
+                                    .then(
+                                        when {
+                                            isRestoreTarget -> Modifier.focusRequester(restore)
+                                            index == 0 -> Modifier.focusRequester(contentFocus)
+                                            else -> Modifier
+                                        },
+                                    )
+                                    .onFocusChanged { posterFocused = it.hasFocus }
+                                    // LEFT from the first column brings the categories back and moves focus to them.
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && index % columns == 0) {
+                                            sidebarVisible = true
+                                            runCatching { categoryFocus.requestFocus() }
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    },
+                            )
+                        }
                     }
                 }
             }

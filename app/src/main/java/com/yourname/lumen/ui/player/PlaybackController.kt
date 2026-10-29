@@ -24,6 +24,19 @@ import com.yourname.lumen.domain.model.LiveChannel
  * same player, so going fullscreen and back never restarts the stream.
  */
 @OptIn(UnstableApi::class)
+/** A movie or episode being played. */
+class VodSession(
+    val title: String,
+    val subtitle: String?,
+    val url: String,
+    /** Where this title's resume position is stored. */
+    val resumeKey: String,
+    /** Where to start, in milliseconds (0 = the beginning). */
+    val startMs: Long = 0L,
+    /** The next episode to play when this one ends, if there is one. */
+    val next: (() -> VodSession?)? = null,
+)
+
 class PlaybackController(context: Context) {
 
     val exo: ExoPlayer
@@ -31,7 +44,14 @@ class PlaybackController(context: Context) {
     /** The channel that is loaded (playing, buffering or failed). Null when nothing is selected. */
     var channel by mutableStateOf<LiveChannel?>(null)
         private set
+    /** The movie or episode that is loaded, or null when a live channel (or nothing) is. */
+    var vod by mutableStateOf<VodSession?>(null)
+        private set
     var buffering by mutableStateOf(false)
+        private set
+
+    /** True once the movie or episode has played to its end. */
+    var vodEnded by mutableStateOf(false)
         private set
     var failed by mutableStateOf(false)
         private set
@@ -63,6 +83,7 @@ class PlaybackController(context: Context) {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     buffering = playbackState == Player.STATE_BUFFERING
                     if (playbackState == Player.STATE_READY) failed = false
+                    if (playbackState == Player.STATE_ENDED && vod != null) vodEnded = true
                 }
 
                 override fun onTracksChanged(tracks: Tracks) {
@@ -108,7 +129,28 @@ class PlaybackController(context: Context) {
         start()
     }
 
+    /** Plays a movie or an episode from its address. Replaces whatever was playing. */
+    fun playVod(session: VodSession, startMs: Long = session.startMs) {
+        channel = null
+        urlFor = null
+        canFallBack = false
+        vod = session
+        vodEnded = false
+        failed = false
+        videoHeight = 0
+        audioLabel = null
+        buffering = true
+        exo.setMediaItem(MediaItem.fromUri(session.url), startMs)
+        exo.prepare()
+        exo.playWhenReady = true
+    }
+
     fun retry() {
+        vod?.let {
+            // Try again from where it stopped, not from the beginning.
+            playVod(it, exo.currentPosition.coerceAtLeast(it.startMs))
+            return
+        }
         failed = false
         extension = firstExtension
         start()
@@ -118,6 +160,8 @@ class PlaybackController(context: Context) {
         exo.stop()
         exo.clearMediaItems()
         channel = null
+        vod = null
+        vodEnded = false
         buffering = false
         failed = false
         videoHeight = 0

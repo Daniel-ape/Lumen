@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -67,7 +68,11 @@ private enum class PanelMode { Hidden, Info, Guide }
 
 private val InfoWidth = 540.dp
 private val InfoHeight = 74.dp
-private val PanelColor = Color(0xE00D0F12)
+// A light, frosted look: a thin dark tint keeps text readable over bright video, a soft white sheen on top gives
+// it the glass feel, and a brighter edge along the top catches the light. (The video behind is not blurred.)
+private val PanelTint = Color(0x57121620)
+private val PanelSheen = Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x0FFFFFFF)))
+private val PanelEdge = Brush.verticalGradient(listOf(Color(0x66FFFFFF), Color(0x1AFFFFFF)))
 
 /**
  * Controls drawn over the fullscreen video (the video itself is the shared [VideoLayer]).
@@ -207,7 +212,7 @@ fun FullscreenControls(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .widthIn(max = 380.dp)
-                    .background(PanelColor, RoundedCornerShape(16.dp))
+                    .background(PanelTint, RoundedCornerShape(16.dp))
                     .glass(RoundedCornerShape(16.dp), GlassLevel.Nav)
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -251,8 +256,9 @@ fun FullscreenControls(
                     .size(width = width, height = height)
                     .graphicsLayer { this.alpha = alpha }
                     .clip(shape)
-                    .background(PanelColor, shape)
-                    .border(1.dp, Color(0x33FFFFFF), shape),
+                    .background(PanelTint, shape)
+                    .background(PanelSheen, shape)
+                    .border(1.dp, PanelEdge, shape),
             ) {
                 // Content keeps its final size and is simply revealed as the panel grows, so nothing reflows.
                 Crossfade(
@@ -318,7 +324,7 @@ private fun StatusPill(text: String, modifier: Modifier = Modifier) {
         text = text,
         style = LumenTheme.typography.label,
         modifier = modifier
-            .background(PanelColor, RoundedCornerShape(50))
+            .background(PanelTint, RoundedCornerShape(50))
             .glass(RoundedCornerShape(50), GlassLevel.Nav)
             .padding(horizontal = 14.dp, vertical = 6.dp),
     )

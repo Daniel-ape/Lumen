@@ -1,5 +1,6 @@
 package com.yourname.lumen.ui.settings
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -105,8 +106,9 @@ class ConfirmRequest(
 val LocalConfirm = staticCompositionLocalOf<(ConfirmRequest) -> Unit> { {} }
 
 // The category column is darker than the settings beside it, so the two read as separate areas.
-private val SidebarColor = Color(0xD90A0B0D)
-private val SidebarEdge = Color(0x1AFFFFFF)
+private val SidebarTint = Color(0x990C0F1C)
+private val SidebarSheen = Brush.verticalGradient(listOf(Color(0x24B4C0FF), Color(0x08B4C0FF)))
+private val SidebarEdge = Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF)))
 
 /**
  * Two columns: categories on the left, the selected category's settings on the right.
@@ -144,18 +146,6 @@ fun SettingsScreen(
         }
     }
 
-    // When a question closes its dialog is removed, so put focus back on the open category.
-    var dialogWasOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(confirm == null) {
-        if (confirm != null) {
-            dialogWasOpen = true
-        } else if (dialogWasOpen) {
-            dialogWasOpen = false
-            delay(60)
-            runCatching { sidebarFocus[selected.ordinal].requestFocus() }
-        }
-    }
-
     CompositionLocalProvider(LocalConfirm provides { confirm = it }) {
         val request = confirm
         if (request != null) {
@@ -175,7 +165,8 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(236.dp)
                                 .fillMaxHeight()
-                                .background(SidebarColor, RoundedCornerShape(16.dp))
+                                .background(SidebarTint, RoundedCornerShape(16.dp))
+                                .background(SidebarSheen, RoundedCornerShape(16.dp))
                                 .border(1.dp, SidebarEdge, RoundedCornerShape(16.dp))
                                 .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -294,7 +285,7 @@ private fun SidebarItem(
             .then(
                 when {
                     focused -> Modifier.glass(shape, GlassLevel.Selected)
-                    selected -> Modifier.background(Color(0x26FFFFFF), shape)
+                    selected -> Modifier.background(LumenTheme.colors.accent.copy(alpha = 0.22f), shape)
                     else -> Modifier
                 },
             )
@@ -332,21 +323,25 @@ private fun SettingsPanel(
     actions: SettingsActions,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier,
-        // Side padding leaves room for the focus scale-up so rows never get clipped.
-        contentPadding = PaddingValues(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        when (page) {
-            SettingsPage.Sources -> sourcesItems(sources, info, settings, actions)
-            SettingsPage.Appearance -> appearanceItems(settings, actions)
-            SettingsPage.General -> generalItems(settings, actions)
-            SettingsPage.Player -> playerItems(settings)
-            SettingsPage.LiveTv -> liveTvItems(settings)
-            SettingsPage.Content -> contentItems(settings)
-            SettingsPage.Storage -> storageItems(info, settings, actions)
-            SettingsPage.About -> aboutItems()
+    // Each category gets its own list, so switching never carries over a scroll position, and the content
+    // keeps one fixed width so rows do not stretch or shift from one category to the next.
+    androidx.compose.runtime.key(page) {
+        LazyColumn(
+            modifier = modifier.widthIn(max = 800.dp),
+            // Side padding leaves room for the focus scale-up so rows never get clipped.
+            contentPadding = PaddingValues(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when (page) {
+                SettingsPage.Sources -> sourcesItems(sources, info, settings, actions)
+                SettingsPage.Appearance -> appearanceItems(settings, actions)
+                SettingsPage.General -> generalItems(settings, actions)
+                SettingsPage.Player -> playerItems(settings)
+                SettingsPage.LiveTv -> liveTvItems(settings)
+                SettingsPage.Content -> contentItems(settings)
+                SettingsPage.Storage -> storageItems(info, settings, actions)
+                SettingsPage.About -> aboutItems()
+            }
         }
     }
 }
