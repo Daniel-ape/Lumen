@@ -93,18 +93,17 @@ fun ChannelListRow(
                         true
                     }
 
-                    // Holding OK (the remote repeats the key) opens the menu once, instead of playing the channel.
+                    // Holding OK (the remote repeats the key) marks a long press; nothing happens yet.
                     event.type == KeyEventType.KeyDown && isSelect && event.nativeKeyEvent.repeatCount > 0 -> {
-                        if (!longPressed) {
-                            longPressed = true
-                            onMenu()
-                        }
+                        longPressed = true
                         true
                     }
 
-                    // Releasing OK after a long press must not also count as a normal click.
+                    // The menu opens when OK is let go. Opening it while the key is still down made the release
+                    // press the first button in the menu, which closed it at once. This is not a normal click either.
                     event.type == KeyEventType.KeyUp && isSelect && longPressed -> {
                         longPressed = false
+                        onMenu()
                         true
                     }
 

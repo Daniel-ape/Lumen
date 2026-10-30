@@ -227,7 +227,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                 for (i in 0 until list.length()) list.optJSONObject(i)?.let { add(it, s + 1) }
             }
         }
-        return out.sortedWith(compareBy({ it.season }, { it.number }))
+        return out.distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
     }
 
     // ---------- Live TV
@@ -263,7 +263,7 @@ class XtreamClient(private val source: Source) : SourceClient {
                 categoryId = f["category_id"].orEmpty(),
                 epgId = f.str("epg_channel_id"),
             )
-        }
+        }.distinctBy { it.id }
     }
 
     /** Current and next programme for one channel, from the server's short guide. */
@@ -465,6 +465,7 @@ class XtreamClient(private val source: Source) : SourceClient {
     private suspend fun allMovies(onProgress: (Int) -> Unit = {}): List<MediaItem> = moviesLock.withLock {
         moviesAll ?: withContext(Dispatchers.IO) {
             movieEntries(null, Int.MAX_VALUE, 120_000, onProgress).sortedByDescending { it.first }.map { it.second }
+                .distinctBy { it.id }
         }.also { moviesAll = it }
     }
 
@@ -472,6 +473,7 @@ class XtreamClient(private val source: Source) : SourceClient {
     private suspend fun allSeries(onProgress: (Int) -> Unit = {}): List<MediaItem> = seriesLock.withLock {
         seriesAll ?: withContext(Dispatchers.IO) {
             seriesEntries(null, Int.MAX_VALUE, 120_000, onProgress).sortedByDescending { it.first }.map { it.second }
+                .distinctBy { it.id }
         }.also { seriesAll = it }
     }
 

@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -191,7 +192,8 @@ fun LumenApp(settings: AppSettings) {
     }
 
     // ----- screens
-    var section by remember { mutableStateOf(if (settings.startSection == 1) Section.LiveTv else Section.Home) }
+    // The app always opens on Home.
+    var section by remember { mutableStateOf(Section.Home) }
 
     // Live TV keeps its place: the category and list position survive leaving the screen, and a counter
     // tells the list when fullscreen has just ended so it can scroll back to the channel that was playing.
@@ -500,9 +502,14 @@ fun LumenApp(settings: AppSettings) {
 
     // Put focus on the page once it has something to focus, without stealing it from the dock or the player.
     // (A pending "return to this poster" is left alone: Home puts focus there itself.)
-    LaunchedEffect(formType, detailsItem, programmeDetails, homeState, liveState, section, fullscreen) {
-        val ready = if (section == Section.LiveTv) liveState !is LiveState.Loading else homeState !is HomeState.Loading
-        if (formType == null && detailsItem == null && programmeDetails == null && !fullscreen && controller.vod == null && ready && !dockHasFocus && restoreItemId == null) {
+    var appHasFocus by remember { mutableStateOf(false) }
+    // It runs when the screen changes or the page finishes its first load, never on later background updates,
+    // and never while focus is already inside the app: that used to throw focus back to the first poster
+    // whenever a background load finished, making lists jump while you were scrolling.
+    val pageLoading = if (section == Section.LiveTv) liveState is LiveState.Loading else homeState is HomeState.Loading
+    LaunchedEffect(formType, detailsItem, programmeDetails, pageLoading, section, fullscreen) {
+        val ready = !pageLoading
+        if (!appHasFocus && formType == null && detailsItem == null && programmeDetails == null && !fullscreen && controller.vod == null && ready && !dockHasFocus && restoreItemId == null) {
             // If the page has nothing to focus yet, fall back to the dock so the remote is never dead.
             val ok = runCatching { contentFocus.requestFocus() }.isSuccess
             if (!ok) runCatching { dockFocus.requestFocus() }
@@ -562,7 +569,12 @@ fun LumenApp(settings: AppSettings) {
         if (session.url.isEmpty()) return
         // Live preview (if any) gives way to the movie or episode.
         fullscreen = false
-        controller.playVod(session)
+        try {
+            controller.playVod(session)
+        } catch (e: Exception) {
+            AppLog.add("Could not start playback: ${e.message ?: e.javaClass.simpleName}")
+            controller.stop()
+        }
     }
 
     /** One episode as something playable; when it ends, the next episode of the list plays by itself. */
@@ -686,6 +698,7 @@ fun LumenApp(settings: AppSettings) {
         modifier = Modifier
             .fillMaxSize()
             .background(LumenTheme.colors.background)
+            .onFocusChanged { appHasFocus = it.hasFocus }
             // Ignore the remote while the boot screen is showing.
             .onPreviewKeyEvent { !booted },
     ) {

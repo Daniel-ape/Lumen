@@ -1,5 +1,6 @@
 package com.yourname.lumen.ui.settings
 
+import com.yourname.lumen.core.diagnostics.CrashLog
 import com.yourname.lumen.core.diagnostics.formatMillis
 import com.yourname.lumen.core.diagnostics.Perf
 import android.os.Build
@@ -309,21 +310,8 @@ private fun TextSizePreview(settings: AppSettings) {
 // ============================================================ General
 
 private val RefreshOptions = listOf(0 to "Off", 6 to "Every 6 hours", 12 to "Every 12 hours", 24 to "Every day")
-private val StartOptions = listOf(0 to "Home", 1 to "Live TV")
 
 internal fun LazyListScope.generalItems(settings: AppSettings, actions: SettingsActions) {
-    item(key = "start") {
-        val current = StartOptions.firstOrNull { it.first == settings.startSection } ?: StartOptions[0]
-        SettingChoiceRow(
-            label = "Open Lumen on",
-            description = "The section shown when the app starts.",
-            value = current.second,
-            onCycle = {
-                val next = StartOptions[(StartOptions.indexOf(current) + 1) % StartOptions.size]
-                settings.updateStartSection(next.first)
-            },
-        )
-    }
     item(key = "autorefresh") {
         val current = RefreshOptions.firstOrNull { it.first == settings.autoRefreshHours } ?: RefreshOptions[0]
         SettingChoiceRow(
@@ -616,6 +604,36 @@ internal fun LazyListScope.storageItems(info: SettingsInfo, settings: AppSetting
 
 internal fun LazyListScope.aboutItems() {
     item(key = "about") { AboutContent() }
+    item(key = "crash") {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var crash by remember { mutableStateOf(CrashLog.read(context)) }
+        if (crash != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SettingGroupTitle("Last crash")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .glass(CardShape, GlassLevel.Panel)
+                        .padding(12.dp),
+                ) {
+                    LumenText(
+                        text = crash.orEmpty().lines().take(14).joinToString("\n"),
+                        style = LumenTheme.typography.label.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                        color = LumenTheme.colors.textSecondary,
+                        maxLines = 14,
+                    )
+                }
+                SettingActionRow(
+                    label = "Clear crash report",
+                    description = "Send these lines to the developer so the crash can be fixed.",
+                    onClick = {
+                        CrashLog.clear(context)
+                        crash = null
+                    },
+                )
+            }
+        }
+    }
     item(key = "perf_title") { SettingGroupTitle("Loading times") }
     item(key = "perf") {
         val timings = Perf.timings

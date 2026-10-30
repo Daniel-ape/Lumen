@@ -31,8 +31,8 @@ class LibraryCache(private val dir: File) {
         val json = JSONObject(text)
         HomeContent(
             hero = itemsFromJson(json.optJSONArray("hero")),
-            movies = itemsFromJson(json.optJSONArray("movies")),
-            series = itemsFromJson(json.optJSONArray("series")),
+            movies = itemsFromJson(json.optJSONArray("movies")).distinctBy { it.id },
+            series = itemsFromJson(json.optJSONArray("series")).distinctBy { it.id },
             heroLabel = json.optString("label", "Recently added"),
         )
     }.getOrNull()

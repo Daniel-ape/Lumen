@@ -1,5 +1,8 @@
 package com.yourname.lumen.ui.home
 
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import com.yourname.lumen.ui.components.ChannelLogo
 import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.core.designsystem.glass
@@ -144,16 +147,35 @@ fun HomeScreen(
         if (dockHasFocus) listState.animateScrollToItem(0)
     }
 
+    // Focus moves at once and the page scrolls along with it. (It used to wait for the scroll to finish before the
+    // highlight moved, which felt like a delay on every press.) The scroll is short and eased.
     val goToHero: () -> Unit = {
         scope.launch {
-            listState.animateScrollToItem(0)
+            val scrolling = launch { listState.animateScrollToItem(0) }
             runCatching { contentFocus.requestFocus() }
+            scrolling.join()
         }
     }
     val goToRow: (Int) -> Unit = { k ->
         scope.launch {
-            listState.animateScrollToItem(1 + 2 * k, -topInset)
-            runCatching { rowFocus[k].requestFocus() }
+            val target = 1 + 2 * k
+            val scrolling = launch {
+                val shown = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }
+                if (shown != null) {
+                    listState.animateScrollBy((shown.offset - topInset).toFloat(), tween(210, easing = FastOutSlowInEasing))
+                } else {
+                    listState.animateScrollToItem(target, -topInset)
+                }
+            }
+            // The row may not be on screen yet; try for a moment until it is.
+            var focused = false
+            repeat(10) {
+                if (!focused) {
+                    focused = runCatching { rowFocus[k].requestFocus() }.isSuccess
+                    if (!focused) delay(25)
+                }
+            }
+            scrolling.join()
         }
     }
     val goToDock: () -> Unit = { runCatching { dockFocus.requestFocus() } }

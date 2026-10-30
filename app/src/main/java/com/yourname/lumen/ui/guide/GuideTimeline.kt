@@ -1,7 +1,10 @@
 package com.yourname.lumen.ui.guide
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,16 +25,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -41,7 +54,6 @@ import com.yourname.lumen.core.designsystem.GlassLevel
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.glass
-import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.core.util.clockTime
 import com.yourname.lumen.core.util.timeRangeText
 import com.yourname.lumen.data.epg.EpgCache
@@ -50,6 +62,7 @@ import com.yourname.lumen.domain.model.ProgramInfo
 import com.yourname.lumen.ui.components.ChannelLogo
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val ChannelColumnWidth = 150.dp
 private val RowHeight = 46.dp
@@ -61,16 +74,56 @@ private const val HOURS_BEFORE = 3
 private const val HOURS_TOTAL = 24
 private val NowColor = Color(0xFFFF6B6B)
 
-private class Placement(val program: ProgramInfo, val x: Dp, val width: Dp, val startSec: Long, val endSec: Long)
+/** One programme placed on the axis. [fromSec]/[toSec] are where it is drawn; the real times are on [program]. */
+private class Placement(
+    val program: ProgramInfo,
+    val x: Dp,
+    val width: Dp,
+    val fromSec: Long,
+    val toSec: Long,
+)
 
 /**
- * A horizontal programme guide. Each channel is one row; every programme is a block placed by its
- * real start and end time on a shared time axis, so rows always line up. All rows scroll together
- * sideways (RIGHT moves into the future, LEFT into the past), and a red line marks the current time.
+ * Places a channel's programmes on the axis by their real start and end. Programmes that overlap (some
+ * providers list overlapping or duplicate entries) are trimmed so two blocks never draw on top of each other.
+ */
+private fun placementsOf(
+    schedule: List<ProgramInfo>?,
+    axisStart: Long,
+    axisEnd: Long,
+    dpPerMinute: Float,
+): List<Placement> {
+    if (schedule.isNullOrEmpty()) return emptyList()
+    val out = ArrayList<Placement>()
+    var cursor = axisStart
+    for (p in schedule.filter { it.startSec != null }.sortedBy { it.startSec }) {
+        val rawStart = p.startSec ?: continue
+        val rawEnd = p.endSec ?: (rawStart + 30 * 60L)
+        val from = maxOf(rawStart, cursor)
+        val to = minOf(rawEnd, axisEnd)
+        if (to - from < 120) continue
+        val width = (to - from) / 60f * dpPerMinute - 3f
+        if (width < 12f) continue
+        out.add(Placement(p, ((from - axisStart) / 60f * dpPerMinute).dp, width.dp, from, to))
+        cursor = to
+    }
+    return out
+}
+
+/** The programme at time [t]; if none is, the next one after it, else the last one. */
+private fun indexAt(row: List<Placement>, t: Long): Int =
+    row.indexOfFirst { it.fromSec <= t && t < it.toSec }.takeIf { it >= 0 }
+        ?: row.indexOfFirst { it.fromSec > t }.takeIf { it >= 0 }
+        ?: row.lastIndex
+
+/**
+ * A horizontal programme guide. Each channel is one row; every programme is a block placed by its real
+ * start and end time on a shared time axis, so rows always line up. All rows scroll together sideways, and
+ * a red marker shows the current time.
  *
- * Focus is kept steady: every row always owns exactly one "main" block (the programme airing now, or a
- * plain loading / no-information block) and that same block simply changes content when the data arrives,
- * so focus is never lost while a row is still loading.
+ * Navigation is handled here directly, not by Android's automatic focus search, so it cannot lose its place:
+ * the guide owns one focus point, UP and DOWN move between channels, LEFT and RIGHT move between programmes
+ * (earlier and later), and OK tunes to the channel. The highlighted programme is simply drawn highlighted.
  */
 @Composable
 fun GuideTimeline(
@@ -84,6 +137,7 @@ fun GuideTimeline(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -97,28 +151,118 @@ fun GuideTimeline(
     val totalWidth = (HOURS_TOTAL * 60 * dpPerMinute).dp
 
     val scroll = rememberScrollState()
+    var viewportPx by remember { mutableIntStateOf(0) }
     var scrolledToNow by remember { mutableStateOf(false) }
-    LaunchedEffect(scroll.maxValue) {
-        if (!scrolledToNow && scroll.maxValue > 0) {
+    LaunchedEffect(scroll.maxValue, viewportPx) {
+        if (!scrolledToNow && scroll.maxValue > 0 && viewportPx > 0) {
             val minutes = ((now - axisStart) / 60f - 20f).coerceAtLeast(0f)
             scroll.scrollTo(with(density) { (minutes * dpPerMinute).dp.roundToPx() })
             scrolledToNow = true
         }
     }
 
-    val startIndex = channels.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (startIndex - 1).coerceAtLeast(0))
-    var focusDone by remember { mutableStateOf(false) }
-    val fallbackFocus = remember { FocusRequester() }
+    var selected by remember { mutableIntStateOf(channels.indexOfFirst { it.id == currentId }.coerceAtLeast(0)) }
+    var anchor by remember { mutableLongStateOf(now) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selected - 1).coerceAtLeast(0))
+    val root = remember { FocusRequester() }
+
+    // The guide takes focus itself, with a few tries because the panel is still animating open.
     LaunchedEffect(Unit) {
-        delay(1_400)
-        if (!focusDone) {
-            runCatching { fallbackFocus.requestFocus() }
-            focusDone = true
+        repeat(5) {
+            runCatching { root.requestFocus() }
+            delay(60)
         }
     }
 
-    Column(modifier = modifier) {
+    fun rowFor(index: Int): List<Placement> =
+        channels.getOrNull(index)?.let { placementsOf(epg?.peekSchedule(it), axisStart, axisEnd, dpPerMinute) }.orEmpty()
+
+    /** Scrolls sideways just enough to show the highlighted programme, with a little room around it. */
+    fun showHorizontally(p: Placement) {
+        if (viewportPx <= 0) return
+        val margin = with(density) { 24.dp.roundToPx() }
+        val left = with(density) { p.x.roundToPx() }
+        val right = left + with(density) { p.width.roundToPx() }
+        val target = when {
+            right - left >= viewportPx - 2 * margin -> left - margin
+            left < scroll.value + margin -> left - margin
+            right > scroll.value + viewportPx - margin -> right - viewportPx + margin
+            else -> return
+        }
+        scope.launch { scroll.animateScrollTo(target.coerceIn(0, scroll.maxValue), tween(160)) }
+    }
+
+    fun showVertically(index: Int) {
+        val visible = listState.layoutInfo.visibleItemsInfo
+        if (visible.isEmpty()) return
+        val first = visible.first().index
+        val last = visible.last().index
+        scope.launch {
+            when {
+                index <= first -> listState.animateScrollToItem((index - 1).coerceAtLeast(0))
+                index >= last -> listState.animateScrollToItem((index - (visible.size - 2)).coerceAtLeast(0))
+            }
+        }
+    }
+
+    fun moveChannel(delta: Int) {
+        val next = (selected + delta).coerceIn(0, channels.lastIndex)
+        if (next == selected) return
+        selected = next
+        channels.getOrNull(next)?.let(onFocusChannel)
+        showVertically(next)
+        val row = rowFor(next)
+        if (row.isNotEmpty()) showHorizontally(row[indexAt(row, anchor)])
+    }
+
+    fun moveTime(direction: Int) {
+        val row = rowFor(selected)
+        if (row.isEmpty()) {
+            // No programme data for this channel: still let the user browse the time axis, half an hour at a time.
+            anchor = (anchor + direction * 1800L).coerceIn(axisStart, axisEnd - 1)
+            if (viewportPx > 0) {
+                val x = with(density) { ((anchor - axisStart) / 60f * dpPerMinute).dp.roundToPx() }
+                scope.launch { scroll.animateScrollTo((x - viewportPx / 3).coerceIn(0, scroll.maxValue), tween(160)) }
+            }
+            return
+        }
+        val current = indexAt(row, anchor)
+        val target = (current + direction).coerceIn(0, row.lastIndex)
+        anchor = row[target].fromSec
+        showHorizontally(row[target])
+    }
+
+    Column(
+        modifier = modifier
+            .focusRequester(root)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionUp -> {
+                        moveChannel(-1)
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        moveChannel(1)
+                        true
+                    }
+                    Key.DirectionLeft -> {
+                        moveTime(-1)
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        moveTime(1)
+                        true
+                    }
+                    Key.DirectionCenter, Key.Enter -> {
+                        channels.getOrNull(selected)?.let(onPick)
+                        true
+                    }
+                    else -> false
+                }
+            },
+    ) {
         // time axis
         Row(modifier = Modifier.fillMaxWidth().height(HeaderHeight)) {
             Spacer(Modifier.width(ChannelColumnWidth))
@@ -126,6 +270,7 @@ fun GuideTimeline(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .onSizeChanged { viewportPx = it.width }
                     .clipToBounds()
                     .horizontalScroll(scroll, enabled = false),
             ) {
@@ -145,12 +290,13 @@ fun GuideTimeline(
                     totalWidth = totalWidth,
                     scroll = scroll,
                     showLogos = showLogos,
-                    isCurrent = channel.id == currentId || (currentId == null && i == 0),
-                    fallbackFocus = if (i == 0) fallbackFocus else null,
-                    focusPending = !focusDone,
-                    onAutoFocused = { focusDone = true },
-                    onPick = onPick,
-                    onFocusChannel = onFocusChannel,
+                    isPlaying = channel.id == currentId,
+                    isSelected = i == selected,
+                    anchor = anchor,
+                    onTap = {
+                        selected = i
+                        onPick(channel)
+                    },
                 )
             }
         }
@@ -173,7 +319,7 @@ private fun TimeAxis(axisStart: Long, now: Long, dpPerMinute: Float, totalWidth:
                     .background(Color(0x22FFFFFF)),
             )
             // A time label is skipped where the NOW marker sits, so the two never overlap.
-            if (!nowInside || abs(x.value - nowX.value) > 46f) {
+            if (!nowInside || abs(x.value - nowX.value) > 50f) {
                 LumenText(
                     text = clockTime(axisStart + i * 1800L),
                     style = LumenTheme.typography.label.copy(fontSize = 11.sp),
@@ -212,12 +358,10 @@ private fun GuideRow(
     totalWidth: Dp,
     scroll: androidx.compose.foundation.ScrollState,
     showLogos: Boolean,
-    isCurrent: Boolean,
-    fallbackFocus: FocusRequester?,
-    focusPending: Boolean,
-    onAutoFocused: () -> Unit,
-    onPick: (LiveChannel) -> Unit,
-    onFocusChannel: (LiveChannel) -> Unit,
+    isPlaying: Boolean,
+    isSelected: Boolean,
+    anchor: Long,
+    onTap: () -> Unit,
 ) {
     val type = LumenTheme.typography
     var schedule by remember(channel.id, epg) { mutableStateOf(epg?.peekSchedule(channel)) }
@@ -229,27 +373,11 @@ private fun GuideRow(
             loaded = true
         }
     }
-
-    // Where each programme goes on the axis, from its real start and end.
     val placements = remember(schedule, axisStart, axisEnd, dpPerMinute) {
-        schedule.orEmpty().mapNotNull { p ->
-            val start = p.startSec ?: return@mapNotNull null
-            val end = p.endSec ?: (start + 30 * 60L)
-            val from = maxOf(start, axisStart)
-            val to = minOf(end, axisEnd)
-            if (to <= from) return@mapNotNull null
-            val width = ((to - from) / 60f * dpPerMinute) - 3f
-            if (width < 14f) return@mapNotNull null
-            Placement(p, ((from - axisStart) / 60f * dpPerMinute).dp, width.dp, start, end)
-        }
+        placementsOf(schedule, axisStart, axisEnd, dpPerMinute)
     }
-    // The main block: what is on now, else the next programme, else the first one.
-    val mainIndex = placements.indexOfFirst { it.startSec <= now && now < it.endSec }.takeIf { it >= 0 }
-        ?: placements.indexOfFirst { it.endSec > now }.takeIf { it >= 0 }
-        ?: 0
-    val main = placements.getOrNull(mainIndex)
-    val ownFocus = remember { FocusRequester() }
-    val mainFocus = fallbackFocus ?: ownFocus
+    val highlighted = if (isSelected && placements.isNotEmpty()) indexAt(placements, anchor) else -1
+    val nowX = ((now - axisStart) / 60f * dpPerMinute).dp
 
     Row(
         modifier = Modifier.fillMaxWidth().height(RowHeight),
@@ -263,7 +391,11 @@ private fun GuideRow(
             if (showLogos) ChannelLogo(channel, Modifier.width(26.dp).height(26.dp))
             LumenText(
                 text = channel.name,
-                style = type.body.copy(fontSize = 12.sp, fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal),
+                style = type.body.copy(
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected || isPlaying) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                color = if (isSelected) Color.White else LumenTheme.colors.textSecondary,
                 maxLines = 1,
             )
         }
@@ -280,53 +412,39 @@ private fun GuideRow(
                 if (now in axisStart..axisEnd) {
                     Box(
                         modifier = Modifier
-                            .offset(x = ((now - axisStart) / 60f * dpPerMinute).dp)
+                            .offset(x = nowX)
                             .width(1.5.dp)
                             .fillMaxHeight()
                             .background(NowColor.copy(alpha = 0.8f)),
                     )
                 }
 
-                // Always present and always the same element, so focus survives loading finishing.
-                GuideCell(
-                    requester = mainFocus,
-                    x = main?.x ?: 0.dp,
-                    width = main?.width ?: totalWidth,
-                    title = when {
-                        main != null -> main.program.title
-                        loaded -> "No programme information"
-                        else -> "Loading…"
-                    },
-                    times = main?.let { timeRangeText(it.startSec, it.endSec) },
-                    state = when {
-                        main == null -> CellState.Quiet
-                        main.startSec <= now && now < main.endSec -> CellState.Now
-                        main.endSec <= now -> CellState.Past
-                        else -> CellState.Upcoming
-                    },
-                    autoFocus = focusPending && isCurrent,
-                    onAutoFocused = onAutoFocused,
-                    onFocus = { onFocusChannel(channel) },
-                    onClick = { onPick(channel) },
-                )
-                placements.forEachIndexed { i, p ->
-                    if (i != mainIndex) {
-                        androidx.compose.runtime.key(p.startSec, p.program.title) {
-                            GuideCell(
-                                requester = null,
+                if (placements.isEmpty()) {
+                    // Nothing to place: one quiet block by the current time says why.
+                    Cell(
+                        x = (nowX - 20.dp).coerceAtLeast(0.dp),
+                        width = 300.dp,
+                        title = if (loaded) "No programme information" else "Loading…",
+                        times = null,
+                        state = CellState.Quiet,
+                        selected = isSelected,
+                        onTap = onTap,
+                    )
+                } else {
+                    placements.forEachIndexed { i, p ->
+                        androidx.compose.runtime.key(p.fromSec, p.program.title) {
+                            Cell(
                                 x = p.x,
                                 width = p.width,
                                 title = p.program.title,
-                                times = timeRangeText(p.startSec, p.endSec),
+                                times = timeRangeText(p.program.startSec, p.program.endSec),
                                 state = when {
-                                    p.startSec <= now && now < p.endSec -> CellState.Now
-                                    p.endSec <= now -> CellState.Past
+                                    p.fromSec <= now && now < p.toSec -> CellState.Now
+                                    p.toSec <= now -> CellState.Past
                                     else -> CellState.Upcoming
                                 },
-                                autoFocus = false,
-                                onAutoFocused = {},
-                                onFocus = { onFocusChannel(channel) },
-                                onClick = { onPick(channel) },
+                                selected = i == highlighted,
+                                onTap = onTap,
                             )
                         }
                     }
@@ -338,56 +456,38 @@ private fun GuideRow(
 
 private enum class CellState { Now, Past, Upcoming, Quiet }
 
+/** One programme block. It draws only; the guide itself decides which block is highlighted. */
 @Composable
-private fun GuideCell(
-    requester: FocusRequester?,
+private fun Cell(
     x: Dp,
     width: Dp,
     title: String,
     times: String?,
     state: CellState,
-    autoFocus: Boolean,
-    onAutoFocused: () -> Unit,
-    onFocus: () -> Unit,
-    onClick: () -> Unit,
+    selected: Boolean,
+    onTap: () -> Unit,
 ) {
     val type = LumenTheme.typography
     val colors = LumenTheme.colors
-    var focused by remember { mutableStateOf(false) }
-    val own = remember { FocusRequester() }
-    val focusTarget = requester ?: own
     val shape = RoundedCornerShape(8.dp)
-
-    LaunchedEffect(autoFocus) {
-        if (autoFocus) {
-            runCatching { focusTarget.requestFocus() }
-            onAutoFocused()
-        }
-    }
-
     Column(
         modifier = Modifier
             .offset(x = x)
             .width(width)
             .fillMaxHeight()
             .padding(vertical = 3.dp)
-            .focusRequester(focusTarget)
-            .tvFocusable(
-                onClick = onClick,
-                shape = shape,
-                focusedScale = 1.02f,
-                onFocusChange = {
-                    focused = it
-                    if (it) onFocus()
-                },
-            )
+            .clip(shape)
+            .pointerInput(Unit) { detectTapGestures { onTap() } }
             .then(
                 when {
-                    focused -> Modifier.glass(shape, GlassLevel.Selected)
+                    selected -> Modifier
+                        .background(colors.accent.copy(alpha = 0.55f), shape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.85f), shape)
+
                     // Airing now: tinted with the accent so it stands apart from what has aired and what is coming.
                     state == CellState.Now -> Modifier
-                        .background(colors.accent.copy(alpha = 0.24f), shape)
-                        .border(1.dp, colors.accent.copy(alpha = 0.55f), shape)
+                        .background(colors.accent.copy(alpha = 0.22f), shape)
+                        .border(1.dp, colors.accent.copy(alpha = 0.5f), shape)
 
                     state == CellState.Quiet -> Modifier.background(Color(0x0DFFFFFF), shape)
                     else -> Modifier.glass(shape, GlassLevel.Panel)
@@ -396,21 +496,22 @@ private fun GuideCell(
             .padding(horizontal = 8.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        val textColor = when (state) {
-            CellState.Past -> Color.White.copy(alpha = 0.6f)
-            CellState.Quiet -> colors.textTertiary
+        val textColor = when {
+            selected -> Color.White
+            state == CellState.Past -> Color.White.copy(alpha = 0.6f)
+            state == CellState.Quiet -> colors.textTertiary
             else -> Color.White
         }
         LumenText(
             text = title,
             style = type.body.copy(
                 fontSize = if (state == CellState.Quiet) 11.sp else 12.sp,
-                fontWeight = if (state == CellState.Now) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (selected || state == CellState.Now) FontWeight.SemiBold else FontWeight.Normal,
             ),
             color = textColor,
             maxLines = 1,
         )
-        if (times != null && width >= 96.dp) {
+        if (times != null && width >= 100.dp) {
             LumenText(times, type.label.copy(fontSize = 10.sp), color = colors.textSecondary, maxLines = 1)
         }
     }

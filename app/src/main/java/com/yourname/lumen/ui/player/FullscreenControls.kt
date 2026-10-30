@@ -70,8 +70,8 @@ private val InfoWidth = 540.dp
 private val InfoHeight = 74.dp
 // A light, frosted look: a thin dark tint keeps text readable over bright video, a soft white sheen on top gives
 // it the glass feel, and a brighter edge along the top catches the light. (The video behind is not blurred.)
-private val PanelTint = Color(0x57121620)
-private val PanelSheen = Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x0FFFFFFF)))
+private val PanelTint = Color(0xB3121624)
+private val PanelSheen = Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color(0x08FFFFFF)))
 private val PanelEdge = Brush.verticalGradient(listOf(Color(0x66FFFFFF), Color(0x1AFFFFFF)))
 
 /**
