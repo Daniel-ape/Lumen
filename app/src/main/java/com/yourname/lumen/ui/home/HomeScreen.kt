@@ -247,10 +247,11 @@ fun HomeScreen(
                                 onDown = { if (rows.isNotEmpty()) goToRow(0) },
                                 onFocused = { scope.launch { listState.animateScrollToItem(0) } },
                                 label = state.content.heroLabel,
-                                autoRotate = autoRotate,
                                 onOpenDetails = onOpenDetails,
-                                // Tall enough to fill most of the screen; a sliver of the next row shows below it.
-                                modifier = Modifier.fillParentMaxHeight(0.94f),
+                                restoreItemId = restoreItemId,
+                                onRestored = onRestored,
+                                // Nearly the whole screen, with the next row's title just showing underneath.
+                                modifier = Modifier.fillParentMaxHeight(0.93f),
                             )
                         }
                         rows.forEachIndexed { k, row ->
@@ -333,6 +334,7 @@ private fun PosterRow(
                 imageUrl = m.posterUrl,
                 onClick = { onOpen(m) },
                 modifier = if (isRestoreTarget) Modifier.focusRequester(restore) else Modifier,
+                width = 118.dp,
             )
         }
     }
@@ -396,7 +398,7 @@ private fun ChannelCard(channel: LiveChannel, onClick: () -> Unit, modifier: Mod
     val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = modifier
-            .width(176.dp)
+            .width(150.dp)
             .tvFocusable(onClick = onClick, shape = shape, focusedScale = 1.05f)
             .glass(shape, GlassLevel.Panel)
             .padding(horizontal = 12.dp, vertical = 12.dp),

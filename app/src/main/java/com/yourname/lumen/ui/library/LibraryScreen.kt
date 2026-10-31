@@ -1,80 +1,46 @@
 package com.yourname.lumen.ui.library
 
-import androidx.compose.ui.graphics.Brush
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.focus.focusProperties
-import kotlinx.coroutines.delay
-import com.yourname.lumen.core.designsystem.motionMs
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourname.lumen.core.designsystem.Dimens
-import com.yourname.lumen.core.designsystem.GlassLevel
 import com.yourname.lumen.core.designsystem.LumenButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
-import com.yourname.lumen.core.designsystem.glass
 import com.yourname.lumen.core.designsystem.hueOf
 import com.yourname.lumen.core.designsystem.onDirection
-import com.yourname.lumen.core.designsystem.routeKey
-import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.domain.model.LiveCategory
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
 import com.yourname.lumen.ui.components.PosterCard
 
-private val SortLabels = listOf("Newest", "A–Z", "Top rated")
-
-private class Tab(val id: String?, val name: String, val count: Int)
+/** One horizontal shelf: a category and every title in it. */
+private class Shelf(val key: String, val title: String, val items: List<MediaItem>)
 
 /**
- * The Movies and Series screens: categories in a darker strip on the left, and every title of the
- * chosen category as a poster grid. Picking a poster opens the usual details page; coming back returns
- * to the same category, scroll position and poster. Everything shown comes from the source.
+ * The Movies and Series screens. Every category is its own shelf on one page: scroll down to move between
+ * categories and sideways to browse the titles in the one you are on, so there is no separate category list.
+ * The first shelf is the newest titles. Picking a poster opens the usual details page; coming back returns
+ * to the same shelf, position and poster. Everything shown comes from the source.
  */
 @Composable
 fun LibraryScreen(
@@ -85,11 +51,8 @@ fun LibraryScreen(
     hasSource: Boolean,
     sourceHasLibrary: Boolean,
     showRatings: Boolean,
-    gridState: LazyGridState,
-    categoryIndex: Int,
-    onCategoryIndex: (Int) -> Unit,
-    sortMode: Int,
-    onSortMode: (Int) -> Unit,
+    listState: LazyListState,
+    rowStates: MutableMap<String, LazyListState>,
     restoreItemId: String?,
     onRestored: () -> Unit,
     onOpen: (MediaItem) -> Unit,
@@ -103,226 +66,108 @@ fun LibraryScreen(
     val noun = if (kind == MediaType.Movie) "movies" else "series"
     val title = if (kind == MediaType.Movie) "Movies" else "Series"
 
-    // Category list: "All", then every category that actually holds titles.
-    val tabs = remember(items, categories) {
-        val counts = items.groupingBy { it.categoryId }.eachCount()
+    // Shelves: the newest titles first, then each category (in the source's own order), then anything uncategorised.
+    val shelves = remember(items, categories) {
+        val distinct = items.distinctBy { it.type.name + it.id }
+        val byCategory = distinct.groupBy { it.categoryId }
+        val known = categories.map { it.id }.toSet()
         buildList {
-            add(Tab(null, "All", items.size))
-            categories.forEach { c ->
-                val n = counts[c.id] ?: 0
-                if (n > 0) add(Tab(c.id, c.name, n))
-            }
-        }
-    }
-    val tabIndex = categoryIndex.coerceIn(0, tabs.lastIndex)
-    val tab = tabs[tabIndex]
-
-    val shown = remember(items, tab.id, sortMode) {
-        val base = (if (tab.id == null) items else items.filter { it.categoryId == tab.id }).distinctBy { it.type.name + it.id }
-        when (sortMode) {
-            1 -> base.sortedBy { it.title.lowercase() }
-            2 -> base.sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-            else -> base
+            if (distinct.isNotEmpty()) add(Shelf("new", "Recently added", distinct.take(40)))
+            categories.forEach { c -> byCategory[c.id]?.let { add(Shelf("c" + c.id, c.name, it)) } }
+            val rest = distinct.filter { it.categoryId == null || it.categoryId !in known }
+            if (rest.isNotEmpty()) add(Shelf("other", "Other", rest))
         }
     }
 
-    // The category list floats over the left edge of the grid, on a soft translucent fade, so the posters never
-    // change size or move when it appears. It shows when you arrive and when you press LEFT from the first
-    // column, and fades away shortly after focus moves onto the posters. It stays while you are using it.
-    var sidebarVisible by remember { mutableStateOf(true) }
-    var gridFocused by remember { mutableStateOf(false) }
-    var sidebarFocused by remember { mutableStateOf(false) }
-    val categoryFocus = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(gridFocused, sidebarFocused) {
-        if (gridFocused && !sidebarFocused) {
-            delay(900)
-            sidebarVisible = false
-        } else if (sidebarFocused) {
-            sidebarVisible = true
-        }
-    }
-    val sidebarAlpha by animateFloatAsState(if (sidebarVisible) 1f else 0f, tween(motionMs(200)), label = "libSidebarAlpha")
-
-    BoxWithConstraints(modifier = modifier.fillMaxSize().padding(top = 64.dp)) {
-        // Six posters across on a typical TV; fewer on narrow screens, never more than six.
-        val columns = when {
-            maxWidth >= 800.dp -> 6
-            maxWidth >= 640.dp -> 5
-            maxWidth >= 480.dp -> 4
-            else -> 3
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(top = 64.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Dimens.ScreenPadding, end = Dimens.ScreenPadding, top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LumenText(title, type.title.copy(fontSize = 22.sp))
+            LumenText(
+                text = if (items.isNotEmpty()) "%,d".format(items.size) else "",
+                style = type.label,
+                color = colors.textTertiary,
+                maxLines = 1,
+            )
         }
 
-        // ---- title, sort, and the grid: full width, evenly centred, constant
-        Column(modifier = Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = Dimens.ScreenPadding, end = Dimens.ScreenPadding, top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+        when {
+            !hasSource -> Message("Add a connection to see your $noun.", "Add connection", onAddSource)
+            !sourceHasLibrary -> Message("This source is a playlist, and playlists only carry live channels, so there are no $noun to show.")
+            items.isEmpty() && loading -> Message("Loading $noun…")
+            items.isEmpty() -> Message("No $noun were found on this source.")
+            else -> LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                LumenText(title, type.title.copy(fontSize = 22.sp))
-                LumenText(
-                    text = if (tab.id == null) "${shown.size}" else "${tab.name} · ${shown.size}",
-                    style = type.label,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
-                if (shown.isNotEmpty()) {
-                    LumenButton(
-                        text = "Sort: ${SortLabels[sortMode.coerceIn(0, SortLabels.lastIndex)]}",
-                        compact = true,
-                        onClick = { onSortMode((sortMode + 1) % SortLabels.size) },
-                    )
-                }
-            }
-
-            when {
-                !hasSource -> Message("Add a connection to see your $noun.", "Add connection", onAddSource)
-                !sourceHasLibrary -> Message("This source is a playlist, and playlists only carry live channels, so there are no $noun to show.")
-                items.isEmpty() && loading -> Message("Loading $noun…")
-                items.isEmpty() -> Message("No $noun were found on this source.")
-                shown.isEmpty() -> Message("Nothing in this category.")
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    state = gridState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // One focus watcher for the whole grid, instead of one per poster.
-                        .onFocusChanged { gridFocused = it.hasFocus },
-                    // Equal padding on both sides keeps the posters centred, and leaves room for the focus scale-up.
-                    contentPadding = PaddingValues(start = Dimens.ScreenPadding, end = Dimens.ScreenPadding, top = 14.dp, bottom = 40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    gridItemsIndexed(shown, key = { _, m -> m.type.name + m.id }) { index, m ->
-                        val restore = remember { FocusRequester() }
-                        val isRestoreTarget = restoreItemId != null && m.id == restoreItemId
-                        LaunchedEffect(isRestoreTarget) {
-                            if (isRestoreTarget) {
-                                runCatching { restore.requestFocus() }
-                                onRestored()
+                itemsIndexed(shelves, key = { _, s -> s.key }) { shelfIndex, shelf ->
+                    Column {
+                        Row(
+                            modifier = Modifier.padding(start = Dimens.ScreenPadding, top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            LumenText(shelf.title, type.heading.copy(fontSize = 16.sp), maxLines = 1, modifier = Modifier.widthIn(max = 520.dp))
+                            LumenText("%,d".format(shelf.items.size), type.label, color = colors.textTertiary)
+                        }
+                        val rowState = rowStates.getOrPut(shelf.key) { LazyListState() }
+                        LazyRow(
+                            state = rowState,
+                            // The padding leaves room for the focus scale-up so a focused poster is never cut off.
+                            contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            itemsIndexed(shelf.items, key = { _, m -> m.type.name + m.id }) { index, m ->
+                                val restore = remember { FocusRequester() }
+                                val isRestoreTarget = restoreItemId != null && m.id == restoreItemId
+                                LaunchedEffect(isRestoreTarget) {
+                                    if (isRestoreTarget) {
+                                        runCatching { restore.requestFocus() }
+                                        onRestored()
+                                    }
+                                }
+                                PosterCard(
+                                    title = m.title,
+                                    subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
+                                        .joinToString(" · "),
+                                    hue = hueOf(m.title),
+                                    imageUrl = m.posterUrl,
+                                    width = 124.dp,
+                                    onClick = { onOpen(m) },
+                                    modifier = Modifier
+                                        .then(
+                                            when {
+                                                isRestoreTarget -> Modifier.focusRequester(restore)
+                                                shelfIndex == 0 && index == 0 -> Modifier.focusRequester(contentFocus)
+                                                else -> Modifier
+                                            },
+                                        )
+                                        // UP from the first shelf goes to the menu.
+                                        .then(
+                                            if (shelfIndex == 0) {
+                                                Modifier.onDirection(Key.DirectionUp) { runCatching { dockFocus.requestFocus() } }
+                                            } else {
+                                                Modifier
+                                            },
+                                        ),
+                                )
                             }
                         }
-                        PosterCard(
-                            title = m.title,
-                            subtitle = listOfNotNull(m.year, if (showRatings) m.rating?.let { "★ $it" } else null)
-                                .joinToString(" · "),
-                            hue = hueOf(m.title),
-                            imageUrl = m.posterUrl,
-                            fillWidth = true,
-                            onClick = { onOpen(m) },
-                            modifier = Modifier
-                                .then(
-                                    when {
-                                        isRestoreTarget -> Modifier.focusRequester(restore)
-                                        index == 0 -> Modifier.focusRequester(contentFocus)
-                                        else -> Modifier
-                                    },
-                                )
-                                // LEFT from the first column brings the categories back and moves focus to them.
-                                .onPreviewKeyEvent { event ->
-                                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && index % columns == 0) {
-                                        scope.launch {
-                                            sidebarVisible = true
-                                            delay(40)
-                                            runCatching { categoryFocus.requestFocus() }
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                },
-                        )
                     }
                 }
             }
         }
-
-        // ---- categories, floating over the left edge on a soft, slightly translucent fade
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .width(240.dp)
-                .fillMaxHeight()
-                .graphicsLayer {
-                    alpha = sidebarAlpha
-                    translationX = -(1f - sidebarAlpha) * 36.dp.toPx()
-                }
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xCC0B0D14),
-                        0.7f to Color(0x990B0D14),
-                        1f to Color.Transparent,
-                    ),
-                )
-                .onFocusChanged { sidebarFocused = it.hasFocus },
-        ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = Dimens.ScreenPadding, end = 28.dp, top = 56.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(tabs, key = { _, t -> t.id ?: "all" }) { i, t ->
-                    CategoryRow(
-                        tab = t,
-                        selected = i == tabIndex,
-                        onFocused = { onCategoryIndex(i) },
-                        modifier = Modifier
-                            // Invisible categories can never take focus by accident.
-                            .focusProperties { canFocus = sidebarVisible }
-                            .then(if (i == tabIndex) Modifier.focusRequester(categoryFocus) else Modifier)
-                            .routeKey(Key.DirectionRight, contentFocus)
-                            .then(if (i == 0) Modifier.onDirection(Key.DirectionUp) { runCatching { dockFocus.requestFocus() } } else Modifier),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryRow(tab: Tab, selected: Boolean, onFocused: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LumenTheme.colors
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .tvFocusable(
-                onClick = onFocused,
-                shape = shape,
-                focusedScale = 1.02f,
-                showOutline = false,
-                onFocusChange = {
-                    focused = it
-                    if (it) onFocused()
-                },
-            )
-            .then(
-                when {
-                    focused -> Modifier.glass(shape, GlassLevel.Selected)
-                    selected -> Modifier.background(Color(0x1FFFFFFF), shape)
-                    else -> Modifier
-                },
-            )
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        LumenText(
-            text = tab.name,
-            style = LumenTheme.typography.body.copy(
-                fontSize = 14.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            ),
-            color = if (selected || focused) colors.textPrimary else colors.textSecondary,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        LumenText(tab.count.toString(), LumenTheme.typography.label.copy(fontSize = 11.sp), color = colors.textTertiary)
     }
 }
 
@@ -340,6 +185,5 @@ private fun Message(text: String, actionLabel: String? = null, onAction: () -> U
             modifier = Modifier.widthIn(max = 460.dp),
         )
         if (actionLabel != null) LumenButton(text = actionLabel, primary = true, onClick = onAction)
-        Spacer(Modifier.width(0.dp))
     }
 }

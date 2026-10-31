@@ -12,7 +12,8 @@ fun backdropRequest(context: Context, url: String): ImageRequest =
     ImageRequest.Builder(context).data(url).size(1280, 720).build()
 
 fun posterRequest(context: Context, url: String): ImageRequest =
-    ImageRequest.Builder(context).data(url).size(300, 450).crossfade(160).build()
+    // Small and without a fade: posters appear instantly, so fast scrolling stays light.
+    ImageRequest.Builder(context).data(url).size(240, 360).build()
 
 fun logoRequest(context: Context, url: String): ImageRequest =
     ImageRequest.Builder(context).data(url).size(96, 96).build()

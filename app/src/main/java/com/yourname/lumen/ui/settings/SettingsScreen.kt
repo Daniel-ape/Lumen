@@ -163,12 +163,9 @@ fun SettingsScreen(
                     ) {
                         Column(
                             modifier = Modifier
-                                .width(236.dp)
+                                .width(220.dp)
                                 .fillMaxHeight()
-                                .background(SidebarTint, RoundedCornerShape(16.dp))
-                                .background(SidebarSheen, RoundedCornerShape(16.dp))
-                                .border(1.dp, SidebarEdge, RoundedCornerShape(16.dp))
-                                .padding(10.dp),
+                                .padding(end = 10.dp),
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                         ) {
                             Row(

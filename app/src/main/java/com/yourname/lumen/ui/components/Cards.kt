@@ -81,10 +81,11 @@ fun PosterCard(
     imageUrl: String? = null,
     onClick: () -> Unit = {},
     fillWidth: Boolean = false,
+    width: androidx.compose.ui.unit.Dp = 150.dp,
 ) {
     Box(
         modifier = modifier
-            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(150.dp))
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(width))
             .aspectRatio(2f / 3f)
             .tvFocusable(onClick = onClick, shape = RoundedCornerShape(Dimens.CardRadius))
             .background(

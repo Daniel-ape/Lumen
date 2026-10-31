@@ -1,72 +1,64 @@
 package com.yourname.lumen.ui.home
 
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.yourname.lumen.core.designsystem.Dimens
-import com.yourname.lumen.core.designsystem.LumenButton
-import com.yourname.lumen.core.designsystem.LumenCircleButton
 import com.yourname.lumen.core.designsystem.LumenText
 import com.yourname.lumen.core.designsystem.LumenTheme
 import com.yourname.lumen.core.designsystem.motionMs
 import com.yourname.lumen.core.designsystem.onDirection
 import com.yourname.lumen.core.designsystem.tvFocusable
 import com.yourname.lumen.core.util.backdropRequest
+import com.yourname.lumen.core.util.thumbRequest
 import com.yourname.lumen.domain.model.MediaItem
 import com.yourname.lumen.domain.model.MediaType
-import kotlinx.coroutines.flow.collectLatest
 
 private val TextShadow = Shadow(color = Color(0xB3000000), offset = Offset(0f, 2f), blurRadius = 8f)
 
-private const val SLIDE_MS = 8_000
-
 /**
- * Full-screen hero. The artwork is the provider's own, shown full-bleed and dissolving into the page.
- * The progress segments at the bottom are real controls: select one to jump to that title.
+ * The top of Home: one title shown large across the whole screen, with a row of wide "Featured" cards over
+ * the bottom of it. Moving along the cards changes the big picture, title and description to the card you are
+ * on; pressing OK opens that title's page (where Play is). The artwork is the provider's own and dissolves into
+ * the page at the bottom, so the cards sit on it with no edge.
+ *
  * [index] and [onIndexChange] are owned by the caller, so the position survives leaving and returning.
  */
 @Composable
@@ -79,40 +71,25 @@ fun HeroSection(
     onUp: () -> Unit,
     onDown: () -> Unit,
     onFocused: () -> Unit,
-    autoRotate: Boolean,
     onOpenDetails: (MediaItem) -> Unit,
+    restoreItemId: String?,
+    onRestored: () -> Unit,
     modifier: Modifier = Modifier,
+    @Suppress("UNUSED_PARAMETER") autoRotate: Boolean = false,
 ) {
     val type = LumenTheme.typography
     val context = LocalContext.current
     val current = index.coerceIn(0, items.lastIndex)
-    var paused by remember { mutableStateOf(false) }
-    val indicatorFocus = remember { FocusRequester() }
-    val progress = remember { Animatable(0f) }
-
-    // Every change of slide, pause or setting restarts the timer from zero, and an old timer is
-    // cancelled first, so quick presses can never leave two timers running or skip a slide.
-    LaunchedEffect(current, autoRotate, items.size) {
-        snapshotFlow { paused }.collectLatest { isPaused ->
-            progress.snapTo(0f)
-            if (autoRotate && !isPaused && items.size > 1) {
-                progress.animateTo(1f, tween(SLIDE_MS, easing = LinearEasing))
-                onIndexChange((current + 1) % items.size)
-            }
-        }
-    }
 
     Box(modifier = modifier.fillMaxWidth()) {
-        val fadeMs = motionMs(600)
         // Artwork and text change together in one crossfade, so one title is never over another's picture.
-        Crossfade(targetState = current, animationSpec = tween(fadeMs), label = "hero") { i ->
+        Crossfade(targetState = current, animationSpec = tween(motionMs(450)), label = "hero") { i ->
             val item = items[i.coerceIn(0, items.lastIndex)]
             val image = item.backdropUrl ?: item.posterUrl
             Box(modifier = Modifier.fillMaxSize()) {
                 if (image != null) {
                     // The picture and its shading are drawn together and then faded to fully transparent toward the
-                    // bottom. Because it fades to nothing (not to a colour), whatever the page looks like behind it
-                    // shows through, so there is no edge and no line, wherever the page is scrolled to.
+                    // bottom. It fades to nothing (not to a colour), so the page behind shows through: no edge, no line.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -122,10 +99,10 @@ fun HeroSection(
                                 drawRect(
                                     brush = Brush.verticalGradient(
                                         0f to Color.Black,
-                                        0.55f to Color.Black,
-                                        0.72f to Color(0xCC000000),
-                                        0.86f to Color(0x66000000),
-                                        0.95f to Color(0x1A000000),
+                                        0.5f to Color.Black,
+                                        0.7f to Color(0xD9000000),
+                                        0.86f to Color(0x80000000),
+                                        0.96f to Color(0x24000000),
                                         1f to Color.Transparent,
                                     ),
                                     blendMode = BlendMode.DstIn,
@@ -139,14 +116,14 @@ fun HeroSection(
                             alignment = Alignment.TopCenter,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        // Shading for the text: darker on the left, and a soft band low down behind the title.
+                        // Shading for the text: darker on the left, and a band low down for the cards.
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(
                                     Brush.horizontalGradient(
-                                        0f to Color(0x99000000),
-                                        0.55f to Color(0x33000000),
+                                        0f to Color(0xB3000000),
+                                        0.5f to Color(0x40000000),
                                         1f to Color.Transparent,
                                     ),
                                 ),
@@ -156,8 +133,8 @@ fun HeroSection(
                                 .fillMaxSize()
                                 .background(
                                     Brush.verticalGradient(
-                                        0.45f to Color.Transparent,
-                                        0.78f to Color(0x66000000),
+                                        0.5f to Color.Transparent,
+                                        0.82f to Color(0x80000000),
                                         1f to Color.Transparent,
                                     ),
                                 ),
@@ -166,19 +143,14 @@ fun HeroSection(
                 }
                 Column(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = Dimens.ScreenPadding, bottom = 92.dp)
-                        .widthIn(max = 460.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .align(Alignment.CenterStart)
+                        .padding(start = Dimens.ScreenPadding, bottom = 120.dp)
+                        .widthIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     LumenText(
-                        label,
-                        type.label.copy(fontSize = 11.sp, shadow = TextShadow),
-                        color = Color.White.copy(alpha = 0.75f),
-                    )
-                    LumenText(
                         item.title,
-                        type.title.copy(fontSize = 24.sp, lineHeight = 28.sp, shadow = TextShadow),
+                        type.title.copy(fontSize = 34.sp, lineHeight = 38.sp, shadow = TextShadow),
                         color = Color.White,
                         maxLines = 2,
                     )
@@ -197,76 +169,52 @@ fun HeroSection(
                             item.plot,
                             type.body.copy(fontSize = 13.sp, lineHeight = 18.sp, shadow = TextShadow),
                             color = Color.White.copy(alpha = 0.9f),
-                            maxLines = 2,
+                            maxLines = 3,
                         )
                     }
                 }
             }
         }
 
-        // Play and info: both open the details page for the title on screen right now.
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = Dimens.ScreenPadding, bottom = 36.dp)
-                .onDirection(Key.DirectionUp, onUp)
-                .onDirection(Key.DirectionDown, onDown)
-                .onFocusChanged {
-                    paused = it.hasFocus
-                    if (it.hasFocus) onFocused()
-                }
-                .focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LumenButton(
-                text = "Play",
-                modifier = Modifier.focusRequester(contentFocus),
-                primary = true,
-                onClick = { onOpenDetails(items[current]) },
+        // The Featured row, over the bottom of the picture.
+        Column(modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 10.dp)) {
+            LumenText(
+                text = "Featured",
+                style = type.heading.copy(fontSize = 15.sp, shadow = TextShadow),
+                modifier = Modifier.padding(start = Dimens.ScreenPadding),
             )
-            LumenCircleButton(
-                text = "i",
-                modifier = Modifier.onDirection(Key.DirectionRight) {
-                    if (items.size > 1) runCatching { indicatorFocus.requestFocus() }
-                },
-                onClick = { onOpenDetails(items[current]) },
-            )
-        }
-
-        // Progress segments, centred along the bottom. Each one can be selected.
-        if (items.size > 1) {
-            Row(
+            val listState = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
+            LazyRow(
+                state = listState,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 22.dp)
                     .onDirection(Key.DirectionUp, onUp)
                     .onDirection(Key.DirectionDown, onDown)
-                    .onFocusChanged {
-                        paused = it.hasFocus
-                        if (it.hasFocus) onFocused()
-                    }
                     .focusGroup(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                // Vertical padding leaves room for the focus scale-up.
+                contentPadding = PaddingValues(horizontal = Dimens.ScreenPadding, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items.indices.forEach { i ->
-                    ProgressSegment(
-                        state = when {
-                            i < current -> SegmentState.Done
-                            i == current -> SegmentState.Active
-                            else -> SegmentState.Waiting
+                itemsIndexed(items, key = { _, m -> m.type.name + m.id }) { i, m ->
+                    val restore = remember { FocusRequester() }
+                    val isRestoreTarget = restoreItemId == "hero:" + m.id
+                    LaunchedEffect(isRestoreTarget) {
+                        if (isRestoreTarget) {
+                            runCatching { restore.requestFocus() }
+                            onRestored()
+                        }
+                    }
+                    FeaturedCard(
+                        item = m,
+                        onFocus = {
+                            onIndexChange(i)
+                            onFocused()
                         },
-                        progress = { if (autoRotate && !paused) progress.value else 1f },
-                        onSelect = { if (i != current) onIndexChange(i) },
-                        modifier = Modifier
-                            .then(if (i == current) Modifier.focusRequester(indicatorFocus) else Modifier)
-                            .then(
-                                if (i == 0) {
-                                    Modifier.onDirection(Key.DirectionLeft) { runCatching { contentFocus.requestFocus() } }
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                        onClick = { onOpenDetails(m) },
+                        modifier = when {
+                            isRestoreTarget -> Modifier.focusRequester(restore)
+                            i == 0 -> Modifier.focusRequester(contentFocus)
+                            else -> Modifier
+                        },
                     )
                 }
             }
@@ -274,81 +222,48 @@ fun HeroSection(
     }
 }
 
-private enum class SegmentState { Done, Active, Waiting }
-
+/** A wide card with the title's picture and name. Moving onto it puts that title in the big picture above. */
 @Composable
-private fun ProgressSegment(
-    state: SegmentState,
-    progress: () -> Float,
-    onSelect: () -> Unit,
+private fun FeaturedCard(
+    item: MediaItem,
+    onFocus: () -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
+    val context = LocalContext.current
+    val shape = RoundedCornerShape(10.dp)
     Box(
         modifier = modifier
+            .width(172.dp)
+            .aspectRatio(16f / 9f)
             .tvFocusable(
-                onClick = onSelect,
+                onClick = onClick,
                 shape = shape,
-                focusedScale = 1.1f,
-                showOutline = false,
-                onFocusChange = { focused = it },
+                focusedScale = 1.08f,
+                onFocusChange = { if (it) onFocus() },
             )
-            // A generous touch/focus area around a thin bar.
-            .padding(horizontal = 4.dp, vertical = 8.dp)
-            .size(width = 30.dp, height = if (focused) 6.dp else 4.dp)
-            .drawBehind {
-                val corner = CornerRadius(size.height / 2f)
-                drawRoundRect(Color.White.copy(alpha = if (focused) 0.45f else 0.28f), cornerRadius = corner)
-                val filled = when (state) {
-                    SegmentState.Done -> 1f
-                    SegmentState.Active -> progress()
-                    SegmentState.Waiting -> 0f
-                }
-                if (filled > 0f) {
-                    drawRoundRect(
-                        Color.White,
-                        size = Size(size.width * filled, size.height),
-                        cornerRadius = corner,
-                    )
-                }
-            },
-    )
-}
-
-/** Shown instead of the hero while loading, with no source, or when the source can't be reached. */
-@Composable
-fun HeroMessage(
-    title: String,
-    message: String,
-    primaryLabel: String?,
-    onPrimary: () -> Unit,
-    contentFocus: FocusRequester,
-    onUp: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LumenTheme.colors
-    val type = LumenTheme.typography
-    Box(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = Dimens.ScreenPadding, bottom = 56.dp)
-                .widthIn(max = 560.dp)
-                .onDirection(Key.DirectionUp, onUp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            LumenText(title, type.display.copy(fontSize = 36.sp, lineHeight = 40.sp))
-            LumenText(message, type.body.copy(fontSize = 15.sp, lineHeight = 21.sp), color = colors.textSecondary)
-            if (primaryLabel != null) {
-                Spacer(Modifier.height(8.dp))
-                LumenButton(
-                    text = primaryLabel,
-                    modifier = Modifier.focusRequester(contentFocus),
-                    primary = true,
-                    onClick = onPrimary,
-                )
-            }
+            .background(Color(0x22FFFFFF), shape),
+    ) {
+        val image = item.backdropUrl ?: item.posterUrl
+        if (image != null) {
+            AsyncImage(
+                model = thumbRequest(context, image),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC000000))),
+        )
+        LumenText(
+            text = item.title,
+            style = LumenTheme.typography.label.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+            color = Color.White,
+            maxLines = 1,
+            modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 8.dp, vertical = 6.dp),
+        )
     }
 }

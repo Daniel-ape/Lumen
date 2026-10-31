@@ -1,5 +1,10 @@
 package com.yourname.lumen.ui.guide
 
+import com.yourname.lumen.core.util.dayAndTime
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -161,8 +166,22 @@ fun GuideTimeline(
         }
     }
 
-    var selected by remember { mutableIntStateOf(channels.indexOfFirst { it.id == currentId }.coerceAtLeast(0)) }
+    // Channels the source has no programme information for are left out of the guide, so it never shows
+    // empty rows. The channel that is playing always stays. Rows report themselves as empty once they have loaded.
+    val empties = remember { mutableStateMapOf<String, Boolean>() }
+    val shown by remember(channels, currentId) {
+        derivedStateOf { channels.filter { it.id == currentId || empties[it.id] != true } }
+    }
+    var selectedId by remember { mutableStateOf(currentId ?: channels.firstOrNull()?.id) }
+    var lastIndex by remember { mutableIntStateOf(0) }
+    val selected = shown.indexOfFirst { it.id == selectedId }.let { if (it >= 0) it else lastIndex.coerceIn(0, (shown.size - 1).coerceAtLeast(0)) }
+    LaunchedEffect(selected, shown.size) {
+        lastIndex = selected
+        // If the highlighted channel just turned out to have nothing to show, move to the one that took its place.
+        if (shown.isNotEmpty() && shown[selected].id != selectedId) selectedId = shown[selected].id
+    }
     var anchor by remember { mutableLongStateOf(now) }
+    var detail by remember { mutableStateOf<GuideDetail?>(null) }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selected - 1).coerceAtLeast(0))
     val root = remember { FocusRequester() }
 
@@ -173,9 +192,10 @@ fun GuideTimeline(
             delay(60)
         }
     }
+    BackHandler(enabled = detail != null) { detail = null }
 
     fun rowFor(index: Int): List<Placement> =
-        channels.getOrNull(index)?.let { placementsOf(epg?.peekSchedule(it), axisStart, axisEnd, dpPerMinute) }.orEmpty()
+        shown.getOrNull(index)?.let { placementsOf(epg?.peekSchedule(it), axisStart, axisEnd, dpPerMinute) }.orEmpty()
 
     /** Scrolls sideways just enough to show the highlighted programme, with a little room around it. */
     fun showHorizontally(p: Placement) {
@@ -206,33 +226,41 @@ fun GuideTimeline(
     }
 
     fun moveChannel(delta: Int) {
-        val next = (selected + delta).coerceIn(0, channels.lastIndex)
+        detail = null
+        val next = (selected + delta).coerceIn(0, (shown.size - 1).coerceAtLeast(0))
         if (next == selected) return
-        selected = next
-        channels.getOrNull(next)?.let(onFocusChannel)
+        selectedId = shown[next].id
+        onFocusChannel(shown[next])
         showVertically(next)
         val row = rowFor(next)
         if (row.isNotEmpty()) showHorizontally(row[indexAt(row, anchor)])
     }
 
     fun moveTime(direction: Int) {
+        detail = null
         val row = rowFor(selected)
-        if (row.isEmpty()) {
-            // No programme data for this channel: still let the user browse the time axis, half an hour at a time.
-            anchor = (anchor + direction * 1800L).coerceIn(axisStart, axisEnd - 1)
-            if (viewportPx > 0) {
-                val x = with(density) { ((anchor - axisStart) / 60f * dpPerMinute).dp.roundToPx() }
-                scope.launch { scroll.animateScrollTo((x - viewportPx / 3).coerceIn(0, scroll.maxValue), tween(160)) }
-            }
-            return
-        }
+        if (row.isEmpty()) return
         val current = indexAt(row, anchor)
         val target = (current + direction).coerceIn(0, row.lastIndex)
         anchor = row[target].fromSec
         showHorizontally(row[target])
     }
 
-    Column(
+    /** OK: show more about the highlighted programme. A second OK (with the card open) watches that channel. */
+    fun select() {
+        val channel = shown.getOrNull(selected) ?: return
+        val open = detail
+        if (open != null) {
+            detail = null
+            onPick(channel)
+            return
+        }
+        val row = rowFor(selected)
+        if (row.isEmpty()) return
+        detail = GuideDetail(channel, row[indexAt(row, anchor)].program)
+    }
+
+    Box(
         modifier = modifier
             .focusRequester(root)
             .focusable()
@@ -256,13 +284,14 @@ fun GuideTimeline(
                         true
                     }
                     Key.DirectionCenter, Key.Enter -> {
-                        channels.getOrNull(selected)?.let(onPick)
+                        select()
                         true
                     }
                     else -> false
                 }
             },
     ) {
+    Column(modifier = Modifier.fillMaxSize()) {
         // time axis
         Row(modifier = Modifier.fillMaxWidth().height(HeaderHeight)) {
             Spacer(Modifier.width(ChannelColumnWidth))
@@ -279,7 +308,7 @@ fun GuideTimeline(
         }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f)) {
-            itemsIndexed(channels, key = { _, c -> c.id }) { i, channel ->
+            itemsIndexed(shown, key = { _, c -> c.id }) { i, channel ->
                 GuideRow(
                     channel = channel,
                     epg = epg,
@@ -293,13 +322,64 @@ fun GuideTimeline(
                     isPlaying = channel.id == currentId,
                     isSelected = i == selected,
                     anchor = anchor,
-                    onTap = {
-                        selected = i
-                        onPick(channel)
-                    },
+                    onEmpty = { empties[channel.id] = true },
+                    onTap = { selectedId = channel.id },
                 )
             }
         }
+    }
+
+    // More about the highlighted programme: what it is, when, on which channel, and what it is about.
+    detail?.let { d ->
+        DetailCard(
+            detail = d,
+            now = now,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+        )
+    }
+    }
+}
+
+private class GuideDetail(val channel: LiveChannel, val program: ProgramInfo)
+
+@Composable
+private fun DetailCard(detail: GuideDetail, now: Long, modifier: Modifier = Modifier) {
+    val type = LumenTheme.typography
+    val colors = LumenTheme.colors
+    val p = detail.program
+    val whenText = when {
+        p.startSec != null && p.endSec != null && p.startSec <= now && now < p.endSec -> "On now"
+        p.endSec != null && p.endSec <= now -> "Already aired"
+        p.startSec != null -> {
+            val minutes = ((p.startSec - now) / 60).coerceAtLeast(0)
+            if (minutes < 60) "Starts in $minutes min" else "Starts " + dayAndTime(p.startSec)
+        }
+        else -> ""
+    }
+    Column(
+        modifier = modifier
+            .widthIn(max = 640.dp)
+            .background(Color(0xF2101218), RoundedCornerShape(14.dp))
+            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        LumenText(p.title, type.heading.copy(fontSize = 16.sp), maxLines = 2)
+        LumenText(
+            text = listOfNotNull(detail.channel.name, timeRangeText(p.startSec, p.endSec), whenText.takeIf { it.isNotEmpty() })
+                .joinToString("  ·  "),
+            style = type.label.copy(fontSize = 12.sp),
+            color = colors.textSecondary,
+            maxLines = 1,
+        )
+        p.description?.let {
+            LumenText(it, type.label.copy(fontSize = 12.sp, lineHeight = 16.sp), color = Color.White.copy(alpha = 0.9f), maxLines = 3)
+        }
+        LumenText(
+            "OK: watch this channel    Back: close",
+            type.label.copy(fontSize = 11.sp),
+            color = colors.textTertiary,
+        )
     }
 }
 
@@ -361,6 +441,7 @@ private fun GuideRow(
     isPlaying: Boolean,
     isSelected: Boolean,
     anchor: Long,
+    onEmpty: () -> Unit,
     onTap: () -> Unit,
 ) {
     val type = LumenTheme.typography
@@ -375,6 +456,10 @@ private fun GuideRow(
     }
     val placements = remember(schedule, axisStart, axisEnd, dpPerMinute) {
         placementsOf(schedule, axisStart, axisEnd, dpPerMinute)
+    }
+    // Loaded and nothing to show: the guide drops this channel.
+    LaunchedEffect(loaded, placements.isEmpty()) {
+        if (loaded && placements.isEmpty()) onEmpty()
     }
     val highlighted = if (isSelected && placements.isNotEmpty()) indexAt(placements, anchor) else -1
     val nowX = ((now - axisStart) / 60f * dpPerMinute).dp
@@ -420,16 +505,15 @@ private fun GuideRow(
                 }
 
                 if (placements.isEmpty()) {
-                    // Nothing to place: one quiet block by the current time says why.
-                    Cell(
-                        x = (nowX - 20.dp).coerceAtLeast(0.dp),
-                        width = 300.dp,
-                        title = if (loaded) "No programme information" else "Loading…",
-                        times = null,
-                        state = CellState.Quiet,
-                        selected = isSelected,
-                        onTap = onTap,
-                    )
+                    // Still loading: just a small, plain word by the current time, no block.
+                    if (!loaded) {
+                        LumenText(
+                            text = "Loading…",
+                            style = type.label.copy(fontSize = 11.sp),
+                            color = LumenTheme.colors.textTertiary,
+                            modifier = Modifier.offset(x = (nowX + 8.dp)).padding(top = 14.dp),
+                        )
+                    }
                 } else {
                     placements.forEachIndexed { i, p ->
                         androidx.compose.runtime.key(p.fromSec, p.program.title) {

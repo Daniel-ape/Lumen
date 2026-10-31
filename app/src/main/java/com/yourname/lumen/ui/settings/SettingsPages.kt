@@ -332,14 +332,6 @@ internal fun LazyListScope.generalItems(settings: AppSettings, actions: Settings
             onToggle = { settings.updateConfirmDestructive(!settings.confirmDestructive) },
         )
     }
-    item(key = "dock_focus") {
-        SettingToggleRow(
-            label = "Open pages as you move across the menu",
-            description = "Moving over Home, Live TV, Movies and the other menu items opens them straight away. Turn off to open them with OK.",
-            checked = settings.dockSwitchOnFocus,
-            onToggle = { settings.updateDockSwitchOnFocus(!settings.dockSwitchOnFocus) },
-        )
-    }
     item(key = "reset_prefs") {
         val confirm = LocalConfirm.current
         SettingActionRow(
@@ -514,14 +506,6 @@ internal fun LazyListScope.contentItems(settings: AppSettings) {
             description = "Adds the score next to the year under each poster.",
             checked = settings.showRatings,
             onToggle = { settings.updateShowRatings(!settings.showRatings) },
-        )
-    }
-    item(key = "rotate") {
-        SettingToggleRow(
-            label = "Auto-rotate featured titles",
-            description = "Changes the big featured title on Home every few seconds.",
-            checked = settings.heroAutoRotate,
-            onToggle = { settings.updateHeroAutoRotate(!settings.heroAutoRotate) },
         )
     }
 }

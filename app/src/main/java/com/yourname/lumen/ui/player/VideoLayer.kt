@@ -1,5 +1,10 @@
 package com.yourname.lumen.ui.player
 
+import com.yourname.lumen.core.designsystem.motionMs
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import android.view.LayoutInflater
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,14 +44,23 @@ fun VideoLayer(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val placement = if (fullscreen || previewBounds == null) {
+    // 0 = sitting over the preview slot, 1 = filling the screen. The video grows and shrinks between the two.
+    val expand by animateFloatAsState(
+        targetValue = if (fullscreen || previewBounds == null) 1f else 0f,
+        animationSpec = tween(motionMs(360), easing = FastOutSlowInEasing),
+        label = "videoExpand",
+    )
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    val placement = if (previewBounds == null || expand >= 1f) {
         Modifier.fillMaxSize()
     } else {
+        fun mix(from: Float, to: Float) = from + (to - from) * expand
         Modifier
-            .offset { IntOffset(previewBounds.left.roundToInt(), previewBounds.top.roundToInt()) }
+            .offset { IntOffset(mix(previewBounds.left, 0f).roundToInt(), mix(previewBounds.top, 0f).roundToInt()) }
             .size(
-                width = with(density) { previewBounds.width.toDp() },
-                height = with(density) { previewBounds.height.toDp() },
+                width = with(density) { mix(previewBounds.width, screenWidthPx).toDp() },
+                height = with(density) { mix(previewBounds.height, screenHeightPx).toDp() },
             )
     }
 

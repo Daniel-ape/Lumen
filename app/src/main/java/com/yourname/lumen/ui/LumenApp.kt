@@ -1,5 +1,6 @@
 package com.yourname.lumen.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -126,7 +126,7 @@ fun LumenApp(settings: AppSettings) {
     val scope = rememberCoroutineScope()
 
     // Animation lengths (all zero when the user chose Reduced Motion).
-    val msSection = motionMs(220)
+    val msSection = motionMs(300)
     val msDock = motionMs(260)
     val msBoot = motionMs(400)
 
@@ -161,12 +161,10 @@ fun LumenApp(settings: AppSettings) {
     var movieCategories by remember { mutableStateOf<List<LiveCategory>>(emptyList()) }
     var seriesCategories by remember { mutableStateOf<List<LiveCategory>>(emptyList()) }
     var categoriesFor by remember { mutableStateOf<String?>(null) }
-    val movieGrid = rememberLazyGridState()
-    val seriesGrid = rememberLazyGridState()
-    var movieCategory by remember { mutableIntStateOf(0) }
-    var seriesCategory by remember { mutableIntStateOf(0) }
-    var movieSort by remember { mutableIntStateOf(0) }
-    var seriesSort by remember { mutableIntStateOf(0) }
+    val movieList = rememberLazyListState()
+    val seriesList = rememberLazyListState()
+    val movieShelves = remember { HashMap<String, LazyListState>() }
+    val seriesShelves = remember { HashMap<String, LazyListState>() }
 
     // Home's position is kept here, so leaving Home (details, other sections) and coming back
     // returns to the same scroll position, hero slide and row positions.
@@ -314,7 +312,7 @@ fun LumenApp(settings: AppSettings) {
     // Start loading the hero pictures the moment their addresses are known, before they are on screen.
     LaunchedEffect(homeState) {
         val ready = homeState as? HomeState.Ready ?: return@LaunchedEffect
-        ready.content.hero.take(3).forEach { item ->
+        ready.content.hero.take(5).forEach { item ->
             (item.backdropUrl ?: item.posterUrl)?.let { context.imageLoader.enqueue(backdropRequest(context, it)) }
         }
     }
@@ -521,20 +519,6 @@ fun LumenApp(settings: AppSettings) {
         if (section != Section.Home) homeAtTop = true
     }
     val dockVisible = !fullscreen && (section != Section.Home || homeAtTop || dockHasFocus || dockForced)
-
-    // Moving across the dock opens each page after a short pause, so sweeping past items does not load them.
-    // The pause is cancelled the moment focus leaves the dock.
-    var dockFocusTarget by remember { mutableStateOf<Section?>(null) }
-    LaunchedEffect(dockFocusTarget, dockHasFocus) {
-        val target = dockFocusTarget
-        if (dockHasFocus && target != null && target != section && settings.dockSwitchOnFocus) {
-            delay(320)
-            section = target
-        }
-    }
-    LaunchedEffect(dockHasFocus) {
-        if (!dockHasFocus) dockFocusTarget = null
-    }
 
     // Back on the menu of any other page goes to Home first; Back on Home's menu leaves the app.
     BackHandler(enabled = dockHasFocus && section != Section.Home && formType == null && detailsItem == null && programmeDetails == null && !fullscreen) {
@@ -791,8 +775,17 @@ fun LumenApp(settings: AppSettings) {
                 // Only one screen exists at a time, and it fades in. (A cross-fade kept the old screen alive
                 // for a moment too, and the remote could land on that invisible old screen.)
                 val fade = remember(section) { Animatable(0f) }
-                LaunchedEffect(section) { fade.animateTo(1f, tween(msSection)) }
-                Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value }) {
+                LaunchedEffect(section) { fade.animateTo(1f, tween(msSection, easing = FastOutSlowInEasing)) }
+                Box(
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        // Fades in while rising a little and settling from a touch smaller.
+                        alpha = fade.value
+                        translationY = (1f - fade.value) * 22.dp.toPx()
+                        val scale = 0.985f + 0.015f * fade.value
+                        scaleX = scale
+                        scaleY = scale
+                    },
+                ) {
                     val current = section
                     when (current) {
                         Section.Home -> HomeScreen(
@@ -803,7 +796,7 @@ fun LumenApp(settings: AppSettings) {
                             showRatings = settings.showRatings,
                             autoRotate = settings.heroAutoRotate,
                             onOpenDetails = {
-                                restoreItemId = null
+                                restoreItemId = "hero:${it.id}"
                                 detailsItem = it
                             },
                             onRowOpen = {
@@ -967,11 +960,8 @@ fun LumenApp(settings: AppSettings) {
                                 hasSource = activeSource != null,
                                 sourceHasLibrary = activeSource?.type != SourceType.M3U,
                                 showRatings = settings.showRatings,
-                                gridState = if (isMovies) movieGrid else seriesGrid,
-                                categoryIndex = if (isMovies) movieCategory else seriesCategory,
-                                onCategoryIndex = { if (isMovies) movieCategory = it else seriesCategory = it },
-                                sortMode = if (isMovies) movieSort else seriesSort,
-                                onSortMode = { if (isMovies) movieSort = it else seriesSort = it },
+                                listState = if (isMovies) movieList else seriesList,
+                                rowStates = if (isMovies) movieShelves else seriesShelves,
                                 restoreItemId = restoreItemId,
                                 onRestored = { restoreItemId = null },
                                 onOpen = {
@@ -1001,7 +991,7 @@ fun LumenApp(settings: AppSettings) {
                         selected = section,
                         slots = dockSlots,
                         onSelect = { section = it },
-                        onItemFocused = { dockFocusTarget = it },
+                        onItemFocused = {},
                         selectedFocusRequester = dockFocus,
                         downTarget = contentFocus,
                         onDockFocusChange = { dockHasFocus = it },
@@ -1034,7 +1024,12 @@ fun LumenApp(settings: AppSettings) {
         }
 
         // Fullscreen controls: the info bar and the programme guide are two states of one top panel.
-        if (fullscreen && controller.channel != null) {
+        // They fade in once the video has grown to fill the screen, and fade out quickly when leaving.
+        AnimatedVisibility(
+            visible = fullscreen && controller.channel != null,
+            enter = fadeIn(tween(motionMs(260), delayMillis = motionMs(160))),
+            exit = fadeOut(tween(motionMs(140))),
+        ) {
             FullscreenControls(
                 controller = controller,
                 channels = fullscreenChannels,

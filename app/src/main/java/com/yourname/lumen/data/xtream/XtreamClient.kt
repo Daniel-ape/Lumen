@@ -111,7 +111,7 @@ class XtreamClient(private val source: Source) : SourceClient {
         // Series lists already include backdrops, so they can fill the hero and a row straight away.
         val seriesResult = seriesJob.await()
         val series = seriesResult.getOrDefault(emptyList())
-        val heroSeries = (series.filter { it.backdropUrl != null }.ifEmpty { series }).take(3)
+        val heroSeries = (series.filter { it.backdropUrl != null }.ifEmpty { series }).take(5)
         if (series.isNotEmpty()) {
             onPartial(HomeContent(hero = heroSeries, movies = emptyList(), series = series.take(20)))
         }
@@ -128,7 +128,7 @@ class XtreamClient(private val source: Source) : SourceClient {
         // Movies only have a small poster in the list, so ask for the wide backdrop of the few we feature.
         val movieCandidates = movies.filter { it.posterUrl != null }.take(5)
             .map { m -> async { withTimeoutOrNull(8_000) { withDetails(m) } ?: m } }.awaitAll()
-        val heroMovies = movieCandidates.filter { it.backdropUrl != null }.ifEmpty { movieCandidates }.take(3)
+        val heroMovies = movieCandidates.filter { it.backdropUrl != null }.ifEmpty { movieCandidates }.take(5)
 
         // Only titles with usable artwork can be featured.
         val hero = buildList {
