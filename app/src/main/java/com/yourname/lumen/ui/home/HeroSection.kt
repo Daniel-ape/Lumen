@@ -1,5 +1,8 @@
 package com.yourname.lumen.ui.home
 
+import com.yourname.lumen.core.designsystem.LumenButton
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -265,5 +268,42 @@ private fun FeaturedCard(
             maxLines = 1,
             modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 8.dp, vertical = 6.dp),
         )
+    }
+}
+
+/** Shown instead of the hero while loading, with no source, or when the source can't be reached. */
+@Composable
+fun HeroMessage(
+    title: String,
+    message: String,
+    primaryLabel: String?,
+    onPrimary: () -> Unit,
+    contentFocus: FocusRequester,
+    onUp: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LumenTheme.colors
+    val type = LumenTheme.typography
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = Dimens.ScreenPadding, bottom = 56.dp)
+                .widthIn(max = 560.dp)
+                .onDirection(Key.DirectionUp, onUp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LumenText(title, type.display.copy(fontSize = 36.sp, lineHeight = 40.sp))
+            LumenText(message, type.body.copy(fontSize = 15.sp, lineHeight = 21.sp), color = colors.textSecondary)
+            if (primaryLabel != null) {
+                Spacer(Modifier.height(8.dp))
+                LumenButton(
+                    text = primaryLabel,
+                    modifier = Modifier.focusRequester(contentFocus),
+                    primary = true,
+                    onClick = onPrimary,
+                )
+            }
+        }
     }
 }
